@@ -249,3 +249,15 @@ def test_dependency_bounds_audit_rejects_unbounded_or_missing_mcp():
     missing_meta = "Name: agy-mcp\nVersion: 0.1.8\nRequires-Dist: pydantic>=2.7\n"
     problems_missing = _check_dependency_bounds("test.whl", missing_meta)
     assert any("missing Requires-Dist entry for mcp" in p for p in problems_missing)
+
+
+def test_dependency_bounds_audit_rejects_inclusive_major_two_bound():
+    metadata = (
+        "Name: agy-mcp\n"
+        "Version: 0.1.8\n"
+        "Requires-Dist: mcp[cli]>=1.21.2,<=2\n"
+    )
+
+    problems = _check_dependency_bounds("test.whl", metadata)
+
+    assert any("mcp dependency missing required upper bound (<2)" in p for p in problems)

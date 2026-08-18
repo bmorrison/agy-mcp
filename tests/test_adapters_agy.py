@@ -1053,6 +1053,26 @@ def test_footer_parsing_incomplete_with_redacted_reason():
     assert outcome.clean_text == "Partially completed work."
 
 
+def test_footer_parsing_incomplete_requires_reason():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    outcome = parse_footer_and_validate(
+        "Partial work.\nAGY_MCP_STATUS: INCOMPLETE",
+        "execute",
+        safety,
+    )
+
+    assert outcome.had_error is True
+    assert outcome.is_complete is False
+    assert outcome.clean_text == "Partial work."
+    assert outcome.reason == "missing incomplete reason"
+    assert outcome.error_text == (
+        "incomplete_response: INCOMPLETE footer requires a reason"
+    )
+
+
 def test_footer_parsing_missing_in_execute_and_long_fails():
     from agy_mcp.adapters.agy import parse_footer_and_validate
     from agy_mcp.safety import SafetyPolicy

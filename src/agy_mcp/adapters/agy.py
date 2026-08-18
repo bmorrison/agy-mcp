@@ -264,10 +264,21 @@ def parse_footer_and_validate(
                 reason=None,
             )
         elif status_kind.startswith("INCOMPLETE"):
+            if not raw_reason.strip():
+                return FooterParseOutcome(
+                    clean_text=clean_text,
+                    is_complete=False,
+                    had_error=True,
+                    error_kind="incomplete_response",
+                    error_text=(
+                        "incomplete_response: INCOMPLETE footer requires a reason"
+                    ),
+                    reason="missing incomplete reason",
+                )
             clean_reason = (
                 safety.redact(raw_reason.strip())
-                if (safety is not None and raw_reason.strip())
-                else (raw_reason.strip() or "unspecified reason")
+                if safety is not None
+                else raw_reason.strip()
             )
             return FooterParseOutcome(
                 clean_text=clean_text,

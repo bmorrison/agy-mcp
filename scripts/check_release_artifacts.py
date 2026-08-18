@@ -420,7 +420,10 @@ def _check_dependency_bounds(label: str, metadata_text: str) -> list[str]:
         problems.append(f"[{label}] missing Requires-Dist entry for mcp")
     else:
         spec = match.group(1)
-        if not re.search(r"<[=\s]*2(?:\.0(?:\.0)?)?", spec):
+        if not re.search(
+            r"(?:^|,)\s*<\s*2(?:\.0){0,2}\s*(?=,|;|$)",
+            spec,
+        ):
             problems.append(
                 f"[{label}] mcp dependency missing required upper bound (<2): {spec!r}"
             )
