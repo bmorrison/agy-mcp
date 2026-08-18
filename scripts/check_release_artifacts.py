@@ -406,6 +406,27 @@ def _check_contents(label: str, files: list[ArtifactFile]) -> list[str]:
 _DIST_INFO_RE = re.compile(r"^agy_mcp-[^/]+\.dist-info/")
 
 
+_MCP_REQ_RE = re.compile(
+    r"^Requires-Dist:\s*mcp(?:\[[^\]]*\])?\s*(.*?)$", re.MULTILINE | re.IGNORECASE
+)
+
+
+def _check_dependency_bounds(label: str, metadata_text: str) -> list[str]:
+    """Verify that runtime dependencies enforce their required upper bounds."""
+
+    problems: list[str] = []
+    match = _MCP_REQ_RE.search(metadata_text)
+    if not match:
+        problems.append(f"[{label}] missing Requires-Dist entry for mcp")
+    else:
+        spec = match.group(1)
+        if not re.search(r"<[=\s]*2(?:\.0(?:\.0)?)?", spec):
+            problems.append(
+                f"[{label}] mcp dependency missing required upper bound (<2): {spec!r}"
+            )
+    return problems
+
+
 def _check_wheel_metadata(label: str, files: list[ArtifactFile]) -> list[str]:
     """Verify the wheel's dist-info carries the expected control files.
 
@@ -447,6 +468,7 @@ def _check_wheel_metadata(label: str, files: list[ArtifactFile]) -> list[str]:
             problems.append(
                 f"[{label}] METADATA missing ``Version:`` header",
             )
+        problems.extend(_check_dependency_bounds(label, body))
 
     record = next(
         (f for f in dist_info_files if f.path.endswith("/RECORD")),
@@ -499,6 +521,13 @@ def main() -> int:
             )
         )
         problems.extend(_check_contents(sdist.name, artifact_files))
+        pkg_info = next((f for f in artifact_files if f.path == "PKG-INFO"), None)
+        if pkg_info is not None:
+            problems.extend(
+                _check_dependency_bounds(
+                    sdist.name, pkg_info.data.decode("utf-8", errors="replace")
+                )
+            )
     for wheel in wheels:
         artifact_files = _read_wheel(wheel)
         files = [file.path for file in artifact_files]

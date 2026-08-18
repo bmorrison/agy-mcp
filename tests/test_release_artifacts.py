@@ -164,12 +164,17 @@ def test_release_check_allows_placeholder_secret_docs():
     assert problems == []
 
 
+_check_dependency_bounds = release_audit._check_dependency_bounds
+
+
 def test_wheel_metadata_check_accepts_valid_dist_info():
     files = [
         ArtifactFile("agy_mcp/__init__.py", b""),
         ArtifactFile(
             "agy_mcp-0.1.8.dist-info/METADATA",
-            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n",
+            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n"
+            b"Requires-Dist: mcp[cli]<2,>=1.21.2\n"
+            b"Requires-Dist: pydantic>=2.7\n",
         ),
         ArtifactFile("agy_mcp-0.1.8.dist-info/WHEEL", b"Wheel-Version: 1.0\n"),
         ArtifactFile(
@@ -186,7 +191,8 @@ def test_wheel_metadata_check_rejects_missing_dist_info_files():
         ArtifactFile("agy_mcp/__init__.py", b""),
         ArtifactFile(
             "agy_mcp-0.1.8.dist-info/METADATA",
-            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n",
+            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n"
+            b"Requires-Dist: mcp[cli]<2,>=1.21.2\n",
         ),
     ]
 
@@ -202,7 +208,8 @@ def test_wheel_metadata_check_rejects_payload_missing_from_record():
         ArtifactFile("agy_mcp/server.py", b""),
         ArtifactFile(
             "agy_mcp-0.1.8.dist-info/METADATA",
-            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n",
+            b"Metadata-Version: 2.4\nName: agy-mcp\nVersion: 0.1.8\n"
+            b"Requires-Dist: mcp[cli]<2,>=1.21.2\n",
         ),
         ArtifactFile("agy_mcp-0.1.8.dist-info/WHEEL", b"Wheel-Version: 1.0\n"),
         ArtifactFile(
@@ -217,3 +224,28 @@ def test_wheel_metadata_check_rejects_payload_missing_from_record():
         "wheel ships agy_mcp/server.py but RECORD does not list it" in problem
         for problem in problems
     )
+
+
+def test_dependency_bounds_audit_accepts_bounded_mcp():
+    valid_meta = (
+        "Name: agy-mcp\n"
+        "Version: 0.1.8\n"
+        "Requires-Dist: mcp[cli]<2,>=1.21.2\n"
+        "Requires-Dist: pydantic>=2.7\n"
+    )
+    assert _check_dependency_bounds("test.whl", valid_meta) == []
+
+
+def test_dependency_bounds_audit_rejects_unbounded_or_missing_mcp():
+    unbounded_meta = (
+        "Name: agy-mcp\n"
+        "Version: 0.1.8\n"
+        "Requires-Dist: mcp[cli]>=1.21.2\n"
+        "Requires-Dist: pydantic>=2.7\n"
+    )
+    problems = _check_dependency_bounds("test.whl", unbounded_meta)
+    assert any("mcp dependency missing required upper bound (<2)" in p for p in problems)
+
+    missing_meta = "Name: agy-mcp\nVersion: 0.1.8\nRequires-Dist: pydantic>=2.7\n"
+    problems_missing = _check_dependency_bounds("test.whl", missing_meta)
+    assert any("missing Requires-Dist entry for mcp" in p for p in problems_missing)
