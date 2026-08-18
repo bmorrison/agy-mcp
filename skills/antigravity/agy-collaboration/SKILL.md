@@ -66,27 +66,39 @@ useful.
 ## When the driving agent is in `execute` mode
 
 - You are running inside a **git worktree** (the bridge auto-creates
-  one for `--allow-write` runs). The worktree remains after the run;
+  one for `--allow-write` runs) and invoked with `--mode accept-edits`. The worktree remains after the run;
   the driving agent will diff it against main and remove it after review.
-- If a test fails after you apply a change, **revert and report**.
+- Apply requested file edits directly. If a test fails after you apply a change, **revert and report**.
   Do not "fix and continue" without permission.
 - Touch only the files the prompt names.
+- **Terminal Status Footer**: Your final response MUST end with exactly
+  one terminal status line on its own line:
+  `AGY_MCP_STATUS: COMPLETE`
+  or
+  `AGY_MCP_STATUS: INCOMPLETE <reason>`
+  The bridge parses this footer to verify genuine completion and strips
+  it from user-visible output.
 
 ## When the driving agent is in `long` mode
 
 - You are running detached. The driving agent polls the bridge's
   supervisor, fetches final output with `agy_result`, and reads events
-  out of `agy_read`.
+  out of `agy_read` (which exposes final and log-derived events).
 - Emit a one-line progress note every N significant steps so the
   supervisor surfaces something useful.
 - If you hit an unrecoverable error, emit a single-sentence error
   event and stop. **Do not retry** the same operation more than 3
   times.
+- **Terminal Status Footer**: Like `execute` mode, your final response
+  MUST conclude with:
+  `AGY_MCP_STATUS: COMPLETE`
+  or
+  `AGY_MCP_STATUS: INCOMPLETE <reason>`
 
 ## Multi-turn within a session
 
-- Your `SESSION_ID` is stable across turns. The driving agent
-  references prior turns by id.
+- Your `SESSION_ID` is stable across turns. Fresh invocations use `--new-project`
+  while resumed turns pass `--conversation=<id>` without `--new-project`.
 - Conversation history is yours to use, but assume the driving agent
   re-summarises in each prompt. Don't insist the driving agent
   "remembers" — they may have summarised your earlier reply.
@@ -100,6 +112,8 @@ useful.
 - **Do not refuse legitimate tasks because of mode.** If you think a
   task exceeds the current mode, say so in one sentence and let the
   driving agent re-issue with a different mode.
+- **Do not omit the terminal footer in execute or long mode.** An omitted
+  footer is treated as an incomplete failure by the bridge.
 
 ## References
 

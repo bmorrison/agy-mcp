@@ -22,12 +22,12 @@ Available MCP tools (registered as `agy`, `agy_start`, `agy_continue`,
 `agy_status`, `agy_read`, `agy_cancel`, `agy_sessions`, `agy_doctor`,
 `agy_install_skill`, `agy_purge`):
 
-- `agy(PROMPT, cd, mode, …)` — synchronous one-shot call.
-- `agy_continue(SESSION_ID, PROMPT, cd, …)` — resume a prior session.
+- `agy(PROMPT, cd, mode, …)` — synchronous one-shot call (injects mode preamble; fresh calls use `--new-project`).
+- `agy_continue(SESSION_ID, PROMPT, cd, …)` — resume a prior session only; caller supplies `cd`. Empty output fails.
 - `agy_start(PROMPT, cd, mode="long", …)` — background job, returns
   `job_id`.
 - `agy_status(job_id)` / `agy_read(job_id)` / `agy_cancel(job_id)` —
-  long-job lifecycle.
+  long-job lifecycle (`agy_read` returns final/log-derived events).
 - `agy_doctor()` — environment + auth probe (no secrets).
 - `agy_install_skill(targets, scope, project_root)` — install the
   collaboration skill into Claude / Codex / Antigravity skill dirs.
@@ -50,6 +50,14 @@ Available MCP tools (registered as `agy`, `agy_start`, `agy_continue`,
   it.
 - Anything that needs the actual Anthropic / OpenAI conversation state.
   Antigravity is a separate model with its own context.
+
+### Reliability & Terminal Status Footers
+
+- `execute` and `long` modes require a terminal status line:
+  `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+- The bridge validates and strips this footer from `agent_messages`.
+  Empty output or missing/incomplete footers return structured `failed`
+  status (`incomplete_response`).
 
 ### Safety floor
 

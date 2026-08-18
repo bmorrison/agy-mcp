@@ -21,6 +21,8 @@ document a stable JSON/streaming stdout contract for `--print` or
 | `--dangerously-skip-permissions` | Auto-approve all tool permission requests |
 | `-i` / `--prompt-interactive` | Run initial prompt interactively then continue session |
 | `--log-file <path>` | Override CLI log file path |
+| `--mode <mode>` | Execution mode (e.g. `accept-edits`, `plan`) |
+| `--new-project` | Start a fresh project / conversation context |
 | `-p` / `--print` / `--prompt` | One-shot non-interactive print mode |
 | `--print-timeout <dur>` | Print-mode wait timeout (default `5m0s`) |
 | `--sandbox` | Run in sandbox with terminal restrictions enabled |
@@ -34,8 +36,9 @@ Subcommands: `changelog`, `install`, `plugin(s)`, `update`, `help`.
 - `--version` — confirmed by stdout `1.0.0` only when invoked plainly (no flag).
 - `--verbose`, `--quiet`, `--format`.
 
-Detection rule: probe `agy --help`; if any of the above appear in a future version, the
-adapter upgrades that capability flag and uses the structured surface automatically.
+Detection rule: probe `agy --help`; if `--new-project` or `--mode` are present, the
+adapter sets `supports_new_project` and `supports_mode` to True. If absent on older builds,
+the adapter omits the flags and records clear warnings.
 
 ## Environment variables read by `agy`
 
