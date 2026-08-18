@@ -1624,3 +1624,33 @@ def test_all_tool_output_models_round_trip_json(reset_state):
         json_blob = sample.model_dump_json()
         restored = sample.__class__.model_validate_json(json_blob)
         assert restored.model_dump(mode="json") == sample.model_dump(mode="json")
+
+
+async def test_agy_continue_empty_output_fails(reset_state, monkeypatch, tmp_path):
+    """Continuing an agy session where output is empty fails with incomplete_response."""
+    from agy_mcp.adapters.agy import AgyPrintBackend
+
+    wrapper = _make_fake_agy_wrapper(tmp_path)
+    monkeypatch.setenv("AGY_TEST_REPLY", "")
+    monkeypatch.setattr(
+        "agy_mcp.bridge._build_adapter",
+        lambda *a, **kw: AgyPrintBackend(bin_override=str(wrapper)),
+    )
+
+    resp = await server.agy_continue_tool(
+        SESSION_ID="sess_existing_123",
+        PROMPT="continue",
+        cd=str(tmp_path),
+    )
+    assert resp.success is False
+    assert resp.status == "failed"
+    assert "empty output" in (resp.error or "")
+
+
+def test_tool_docstrings_describe_runtime_semantics(reset_state):
+    """Verify agy_continue and agy_read docstrings describe resume-only and event-log boundaries."""
+    tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
+    assert "Resumes the conversation only" in (tools["agy_continue"].description or "")
+    assert "Empty continuation output is treated as a failure" in (tools["agy_continue"].description or "")
+    assert "Exposes final and log-derived events" in (tools["agy_read"].description or "")
+    assert "does not provide live intermediate model reasoning" in (tools["agy_read"].description or "")

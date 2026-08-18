@@ -131,6 +131,10 @@ def _result(
     events: list[CanonicalEvent] | None = None,
     session_id: str | None = "sess-1",
     exit_code: int = 0,
+    had_upstream_error: bool = False,
+    upstream_error_text: str | None = None,
+    had_incomplete_error: bool = False,
+    incomplete_error_text: str | None = None,
 ) -> AdapterRunResult:
     return AdapterRunResult(
         events=events or [],
@@ -141,6 +145,10 @@ def _result(
         stderr_tail="",
         log_path=None,
         artifacts=[],
+        had_upstream_error=had_upstream_error,
+        upstream_error_text=upstream_error_text,
+        had_incomplete_error=had_incomplete_error,
+        incomplete_error_text=incomplete_error_text,
     )
 
 
@@ -1316,3 +1324,121 @@ def test_run_debug_traceback_anonymises_home_path(monkeypatch, tmp_path: Path):
     assert "| tb=" in err
     assert "/Users/" not in err
     assert "/home/" not in err
+
+
+def test_bridge_run_incomplete_response_empty_output(monkeypatch, tmp_path: Path):
+    cap = _capability("agy")
+    fake = _FakeAdapter(
+        capability=cap,
+        run_result=_result(
+            events=[
+                CanonicalEvent(
+                    type="error",
+                    subtype="incomplete_response",
+                    text="incomplete_response: empty output",
+                ),
+                CanonicalEvent(
+                    type="result",
+                    subtype="incomplete_response",
+                    text="incomplete_response: empty output",
+                ),
+            ],
+            had_incomplete_error=True,
+            incomplete_error_text="incomplete_response: empty output",
+        ),
+    )
+    monkeypatch.setattr("agy_mcp.bridge._build_adapter", lambda *a, **kw: fake)
+    req = BridgeRequest(prompt="ask", cwd=str(tmp_path), mode="ask")
+    resp = _run(req, _default_config(), _safety())
+    assert resp.success is False
+    assert resp.status == "failed"
+    assert resp.error == "incomplete_response: empty output"
+
+
+def test_bridge_run_incomplete_response_missing_footer(monkeypatch, tmp_path: Path):
+    cap = _capability("agy")
+    fake = _FakeAdapter(
+        capability=cap,
+        run_result=_result(
+            events=[
+                CanonicalEvent(type="assistant", text="Did work but no footer"),
+                CanonicalEvent(
+                    type="error",
+                    subtype="incomplete_response",
+                    text="incomplete_response: missing required AGY_MCP_STATUS footer",
+                ),
+                CanonicalEvent(
+                    type="result",
+                    subtype="incomplete_response",
+                    text="incomplete_response: missing required AGY_MCP_STATUS footer",
+                ),
+            ],
+            had_incomplete_error=True,
+            incomplete_error_text="incomplete_response: missing required AGY_MCP_STATUS footer",
+        ),
+    )
+    monkeypatch.setattr("agy_mcp.bridge._build_adapter", lambda *a, **kw: fake)
+    req = BridgeRequest(
+        prompt="execute work", cwd=str(tmp_path), mode="execute", allow_write=True, worktree=False
+    )
+    resp = _run(req, _default_config(), _safety())
+    assert resp.success is False
+    assert resp.status == "failed"
+    assert resp.error == "incomplete_response: missing required AGY_MCP_STATUS footer"
+    assert resp.agent_messages == "Did work but no footer"
+
+
+def test_bridge_run_incomplete_response_with_reason(monkeypatch, tmp_path: Path):
+    cap = _capability("agy")
+    fake = _FakeAdapter(
+        capability=cap,
+        run_result=_result(
+            events=[
+                CanonicalEvent(type="assistant", text="Partial work done."),
+                CanonicalEvent(
+                    type="error",
+                    subtype="incomplete_response",
+                    text="incomplete_response: merge conflict in ~/auth.py",
+                ),
+                CanonicalEvent(
+                    type="result",
+                    subtype="incomplete_response",
+                    text="incomplete_response: merge conflict in ~/auth.py",
+                ),
+            ],
+            had_incomplete_error=True,
+            incomplete_error_text="incomplete_response: merge conflict in ~/auth.py",
+        ),
+    )
+    monkeypatch.setattr("agy_mcp.bridge._build_adapter", lambda *a, **kw: fake)
+    req = BridgeRequest(
+        prompt="execute work", cwd=str(tmp_path), mode="execute", allow_write=True, worktree=False
+    )
+    resp = _run(req, _default_config(), _safety())
+    assert resp.success is False
+    assert resp.status == "failed"
+    assert resp.error == "incomplete_response: merge conflict in ~/auth.py"
+    assert resp.agent_messages == "Partial work done."
+
+
+def test_bridge_run_complete_footer_succeeds(monkeypatch, tmp_path: Path):
+    cap = _capability("agy")
+    fake = _FakeAdapter(
+        capability=cap,
+        run_result=_result(
+            events=[
+                CanonicalEvent(type="assistant", text="Work complete."),
+                CanonicalEvent(type="result", subtype="success"),
+            ],
+            had_incomplete_error=False,
+        ),
+    )
+    monkeypatch.setattr("agy_mcp.bridge._build_adapter", lambda *a, **kw: fake)
+    req = BridgeRequest(
+        prompt="execute work", cwd=str(tmp_path), mode="execute", allow_write=True, worktree=False
+    )
+    resp = _run(req, _default_config(), _safety())
+    assert resp.success is True
+    assert resp.status == "completed"
+    assert resp.error is None
+    assert resp.agent_messages == "Work complete."

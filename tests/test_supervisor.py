@@ -60,6 +60,8 @@ class _ScriptedAdapter(BaseAdapter):
         spawn_raises: Exception | None = None,
         had_upstream_error: bool = False,
         upstream_error_text: str | None = None,
+        had_incomplete_error: bool = False,
+        incomplete_error_text: str | None = None,
     ) -> None:
         super().__init__()
         self._cap = capability
@@ -71,6 +73,8 @@ class _ScriptedAdapter(BaseAdapter):
         self._spawn_raises = spawn_raises
         self._had_upstream_error = had_upstream_error
         self._upstream_error_text = upstream_error_text
+        self._had_incomplete_error = had_incomplete_error
+        self._incomplete_error_text = incomplete_error_text
         self.run_requests: list[BridgeRequest] = []
 
     def _probe(self) -> Capability:
@@ -127,6 +131,8 @@ class _ScriptedAdapter(BaseAdapter):
                 stderr_tail="",
                 log_path=None,
                 artifacts=[],
+                had_incomplete_error=self._had_incomplete_error,
+                incomplete_error_text=self._incomplete_error_text,
             )
         return AdapterRunResult(
             events=forwarded,
@@ -139,6 +145,8 @@ class _ScriptedAdapter(BaseAdapter):
             artifacts=[],
             had_upstream_error=self._had_upstream_error,
             upstream_error_text=self._upstream_error_text,
+            had_incomplete_error=self._had_incomplete_error,
+            incomplete_error_text=self._incomplete_error_text,
         )
 
 
@@ -1520,3 +1528,68 @@ def test_worktree_slug_caps_length_at_80_chars():
     req = BridgeRequest(prompt="hi", session_id=long_session)
     slug = _worktree_slug(req, "job_333333_cccccccccccc")
     assert 1 <= len(slug) <= 80
+
+
+def test_supervisor_incomplete_response_fails_job(tmp_path: Path):
+    events = [
+        CanonicalEvent(type="assistant", text="Partial changes applied"),
+        CanonicalEvent(
+            type="error",
+            subtype="incomplete_response",
+            text="incomplete_response: missing required AGY_MCP_STATUS footer",
+        ),
+        CanonicalEvent(
+            type="result",
+            subtype="incomplete_response",
+            text="incomplete_response: missing required AGY_MCP_STATUS footer",
+        ),
+    ]
+    adapter = _ScriptedAdapter(
+        capability=_capability(),
+        events=events,
+        had_incomplete_error=True,
+        incomplete_error_text="incomplete_response: missing required AGY_MCP_STATUS footer",
+    )
+    supervisor = _supervisor_with(adapter, tmp_path=tmp_path)
+    request = BridgeRequest(
+        prompt="do work", cwd=str(tmp_path), mode="execute", allow_write=True
+    )
+    resp = supervisor.start(request)
+    assert resp.success is True
+    job_id = resp.job_id
+    assert job_id is not None
+    assert _wait_for(
+        lambda: supervisor.status(job_id).status in ("completed", "failed"),
+    )
+
+    status_record = supervisor.status(job_id)
+    assert status_record is not None
+    assert status_record.status == "failed"
+    assert "missing required AGY_MCP_STATUS footer" in (status_record.error or "")
+
+
+def test_supervisor_complete_footer_succeeds_job(tmp_path: Path):
+    events = [
+        CanonicalEvent(type="assistant", text="Done with everything."),
+        CanonicalEvent(type="result", subtype="success"),
+    ]
+    adapter = _ScriptedAdapter(
+        capability=_capability(),
+        events=events,
+        had_incomplete_error=False,
+    )
+    supervisor = _supervisor_with(adapter, tmp_path=tmp_path)
+    request = BridgeRequest(
+        prompt="do work", cwd=str(tmp_path), mode="execute", allow_write=True
+    )
+    resp = supervisor.start(request)
+    job_id = resp.job_id
+    assert job_id is not None
+    assert _wait_for(
+        lambda: supervisor.status(job_id).status in ("completed", "failed"),
+    )
+
+    status_record = supervisor.status(job_id)
+    assert status_record is not None
+    assert status_record.status == "completed"
+    assert status_record.error is None

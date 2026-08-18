@@ -385,3 +385,69 @@ def test_detect_caches_until_refresh(tmp_path, monkeypatch):
     backend.detect()
     backend.detect(refresh=True)
     assert calls["n"] == 2
+
+
+def test_agy_probe_detects_new_project_and_mode_when_present(tmp_path, monkeypatch):
+    """Modern agy help text advertising --new-project and --mode sets capability bits."""
+    wrapper = tmp_path / "fake_modern_agy"
+    script = tmp_path / "fake_modern.py"
+    script.write_text(
+        "import sys\n"
+        "if '--help' in sys.argv:\n"
+        "    print('Flags:\\n  --print\\n  --new-project\\n  --mode MODE\\n')\n"
+        "    sys.exit(0)\n"
+        "if '--version' in sys.argv:\n"
+        "    print('1.2.0\\n')\n"
+        "    sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    wrapper.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    backend = AgyPrintBackend(bin_override=str(wrapper))
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_OAUTH_CREDS_PATH", tmp_path / "no-creds.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_SETTINGS_PATH", tmp_path / "no-settings.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_GEMINI_SETTINGS_PATH", tmp_path / "no-gemini.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_LOG_DIR", tmp_path / "no-log-dir")
+
+    cap = backend.detect()
+    assert cap.supports_new_project is True
+    assert cap.supports_mode is True
+    assert not any("--new-project` not detected" in w for w in cap.warnings)
+    assert not any("--mode` not detected" in w for w in cap.warnings)
+
+
+def test_agy_probe_handles_legacy_help_without_new_project_or_mode(tmp_path, monkeypatch):
+    """Legacy agy help text missing --new-project/--mode sets False and records warnings."""
+    wrapper = tmp_path / "fake_legacy_agy"
+    script = tmp_path / "fake_legacy.py"
+    script.write_text(
+        "import sys\n"
+        "if '--help' in sys.argv:\n"
+        "    print('Flags:\\n  --print\\n')\n"
+        "    sys.exit(0)\n"
+        "if '--version' in sys.argv:\n"
+        "    print('1.0.0\\n')\n"
+        "    sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    wrapper.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    backend = AgyPrintBackend(bin_override=str(wrapper))
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_OAUTH_CREDS_PATH", tmp_path / "no-creds.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_SETTINGS_PATH", tmp_path / "no-settings.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_GEMINI_SETTINGS_PATH", tmp_path / "no-gemini.json")
+    monkeypatch.setattr("agy_mcp.adapters.agy.AGY_LOG_DIR", tmp_path / "no-log-dir")
+
+    cap = backend.detect()
+    assert cap.supports_new_project is False
+    assert cap.supports_mode is False
+    assert any("--new-project` not detected" in w for w in cap.warnings)
+    assert any("--mode` not detected" in w for w in cap.warnings)

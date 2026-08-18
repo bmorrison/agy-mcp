@@ -44,6 +44,8 @@ class AdapterRunResult:
     # message for the BridgeResponse.error field.
     had_upstream_error: bool = False
     upstream_error_text: str | None = None
+    had_incomplete_error: bool = False
+    incomplete_error_text: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +107,8 @@ class _RunContext:
     # the first redacted message for the result envelope.
     had_upstream_error: bool = False
     first_upstream_error: str | None = None
+    had_incomplete_error: bool = False
+    first_incomplete_error: str | None = None
 
 
 def _open_spool(path: Path):

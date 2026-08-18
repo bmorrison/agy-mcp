@@ -23,7 +23,7 @@ from agy_mcp.adapters.agy import (
     _RunContext,
 )
 from agy_mcp.adapters.base import ListEventSink
-from agy_mcp.models import BridgeRequest, CanonicalEvent
+from agy_mcp.models import BridgeRequest, CanonicalEvent, Capability
 
 HERE = Path(__file__).parent
 FIXTURES = HERE / "fixtures"
@@ -75,7 +75,10 @@ def test_build_command_includes_print_timeout_and_log_file(tmp_path, isolated_ag
     assert argv[0] == str(wrapper)
     # H1 fix: prompt is fused into --print=<value> so a hostile prompt
     # starting with -- cannot leak through as a flag.
-    assert "--print=hello" in argv
+    assert any(
+        a.startswith("--print=") and "hello" in a and "[System Context]" in a
+        for a in argv
+    )
     assert "--print-timeout" in argv
     idx = argv.index("--print-timeout")
     # Wrapper holds 30s back as grace window.
@@ -110,7 +113,10 @@ def test_build_command_resists_flag_prompt_injection(tmp_path, isolated_agy):
     # The hostile string must live INSIDE --print=<value>, never as a free
     # argv element where the downstream parser could consume it as a flag.
     assert "--dangerously-skip-permissions" not in argv
-    assert any(a.endswith("=--dangerously-skip-permissions") for a in argv)
+    assert any(
+        a.startswith("--print=") and "--dangerously-skip-permissions" in a
+        for a in argv
+    )
 
 
 def test_build_command_raises_without_binary(tmp_path, monkeypatch):
@@ -900,3 +906,252 @@ def test_drain_transcript_refuses_symlink_open(tmp_path):
     ctx = _new_ctx()
     _drain_transcript(link, ctx, backend)
     assert ctx.events == []
+
+
+# ---------------------------------------------------------------------------
+# Antigravity runtime reliability & completion footer tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_command_fresh_includes_new_project_when_supported(tmp_path, isolated_agy):
+    backend = AgyPrintBackend(bin_override=str(tmp_path / "fake"))
+    backend._capability = Capability(
+        bin_path=str(tmp_path / "fake"),
+        backend="agy",
+        supports_print=True,
+        supports_new_project=True,
+        supports_mode=True,
+    )
+    req = BridgeRequest(prompt="fresh start", cwd=str(tmp_path), mode="ask")
+    argv = backend.build_command(req, log_path=None)
+    assert "--new-project" in argv
+    assert "--mode" in argv
+    assert argv[argv.index("--mode") + 1] == "plan"
+
+
+def test_build_command_fresh_omits_new_project_when_unsupported(tmp_path, isolated_agy):
+    backend = AgyPrintBackend(bin_override=str(tmp_path / "fake"))
+    backend._capability = Capability(
+        bin_path=str(tmp_path / "fake"),
+        backend="agy",
+        supports_print=True,
+        supports_new_project=False,
+        supports_mode=False,
+    )
+    req = BridgeRequest(prompt="fresh start", cwd=str(tmp_path), mode="ask")
+    argv = backend.build_command(req, log_path=None)
+    assert "--new-project" not in argv
+    assert "--mode" not in argv
+
+
+def test_build_command_resumed_never_includes_new_project(tmp_path, isolated_agy):
+    backend = AgyPrintBackend(bin_override=str(tmp_path / "fake"))
+    backend._capability = Capability(
+        bin_path=str(tmp_path / "fake"),
+        backend="agy",
+        supports_print=True,
+        supports_conversation=True,
+        supports_new_project=True,
+        supports_mode=True,
+    )
+    req = BridgeRequest(
+        prompt="resume turn",
+        cwd=str(tmp_path),
+        session_id="session-xyz-123",
+        mode="execute",
+        allow_write=True,
+    )
+    argv = backend.build_command(req, log_path=None)
+    assert "--conversation=session-xyz-123" in argv
+    assert "--new-project" not in argv
+    assert "--mode" in argv
+    assert argv[argv.index("--mode") + 1] == "accept-edits"
+
+
+def test_build_command_mode_mapping(tmp_path, isolated_agy):
+    backend = AgyPrintBackend(bin_override=str(tmp_path / "fake"))
+    backend._capability = Capability(
+        bin_path=str(tmp_path / "fake"),
+        backend="agy",
+        supports_print=True,
+        supports_mode=True,
+    )
+
+    # execute mode -> accept-edits
+    req_exec = BridgeRequest(
+        prompt="apply changes", cwd=str(tmp_path), mode="execute", allow_write=True
+    )
+    argv_exec = backend.build_command(req_exec, log_path=None)
+    assert argv_exec[argv_exec.index("--mode") + 1] == "accept-edits"
+
+    # every non-write mode -> plan
+    for non_write_mode in ("ask", "plan", "prototype", "review", "browser", "long"):
+        req = BridgeRequest(prompt="test", cwd=str(tmp_path), mode=non_write_mode)
+        argv = backend.build_command(req, log_path=None)
+        assert argv[argv.index("--mode") + 1] == "plan"
+
+
+def test_preamble_injection_contains_mode_and_conventions():
+    from agy_mcp.adapters.agy import build_preamble
+
+    preamble_exec = build_preamble("execute")
+    assert "Mode: execute." in preamble_exec
+    assert "AGY_MCP_STATUS: COMPLETE" in preamble_exec
+    assert "AGY_MCP_STATUS: INCOMPLETE <reason>" in preamble_exec
+    assert "Respect the working directory (cwd)" in preamble_exec
+
+    preamble_long = build_preamble("long")
+    assert "Mode: long." in preamble_long
+    assert "AGY_MCP_STATUS: COMPLETE" in preamble_long
+
+    preamble_ask = build_preamble("ask")
+    assert "Mode: ask." in preamble_ask
+    assert "Read-only." in preamble_ask
+    assert "AGY_MCP_STATUS" not in preamble_ask
+
+
+def test_footer_parsing_complete_stripped():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "Refactored user auth service.\nAGY_MCP_STATUS: COMPLETE\n"
+    outcome = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome.is_complete is True
+    assert outcome.had_error is False
+    assert outcome.clean_text == "Refactored user auth service."
+    assert outcome.error_text is None
+
+
+def test_footer_parsing_complete_without_trailing_newline():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "Done with refactor.\nAGY_MCP_STATUS: COMPLETE"
+    outcome = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome.is_complete is True
+    assert outcome.had_error is False
+    assert outcome.clean_text == "Done with refactor."
+
+
+def test_footer_parsing_incomplete_with_redacted_reason():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = (
+        "Partially completed work.\n"
+        "AGY_MCP_STATUS: INCOMPLETE hit syntax error in /Users/secretuser/project/src/auth.py\n"
+    )
+    outcome = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome.is_complete is False
+    assert outcome.had_error is True
+    assert outcome.error_kind == "incomplete_response"
+    assert "/Users/secretuser/" not in (outcome.error_text or "")
+    assert "incomplete_response: hit syntax error in ~/project/src/auth.py" == outcome.error_text
+    assert outcome.clean_text == "Partially completed work."
+
+
+def test_footer_parsing_missing_in_execute_and_long_fails():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "I modified the files but forgot the footer."
+    outcome_exec = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome_exec.is_complete is False
+    assert outcome_exec.had_error is True
+    assert outcome_exec.error_text == "incomplete_response: missing required AGY_MCP_STATUS footer"
+    assert outcome_exec.clean_text == "I modified the files but forgot the footer."
+
+    outcome_long = parse_footer_and_validate(raw, "long", safety)
+    assert outcome_long.is_complete is False
+    assert outcome_long.had_error is True
+    assert outcome_long.error_text == "incomplete_response: missing required AGY_MCP_STATUS footer"
+
+
+def test_footer_parsing_missing_in_ask_succeeds():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "The port number is 8080."
+    outcome = parse_footer_and_validate(raw, "ask", safety)
+    assert outcome.is_complete is True
+    assert outcome.had_error is False
+    assert outcome.clean_text == "The port number is 8080."
+
+
+def test_footer_parsing_empty_output_fails_all_modes():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    for mode in ("ask", "plan", "prototype", "review", "execute", "browser", "long"):
+        outcome = parse_footer_and_validate("", mode, safety)
+        assert outcome.had_error is True
+        assert outcome.error_text == "incomplete_response: empty output"
+
+
+def test_footer_parsing_multiple_footers_rejected():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "Step 1\nAGY_MCP_STATUS: COMPLETE\nStep 2\nAGY_MCP_STATUS: COMPLETE"
+    outcome = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome.had_error is True
+    assert "ambiguous or multiple" in (outcome.error_text or "")
+
+
+def test_footer_parsing_non_terminal_footer_rejected():
+    from agy_mcp.adapters.agy import parse_footer_and_validate
+    from agy_mcp.safety import SafetyPolicy
+
+    safety = SafetyPolicy()
+    raw = "Work done.\nAGY_MCP_STATUS: COMPLETE\nWait, I forgot something!"
+    outcome = parse_footer_and_validate(raw, "execute", safety)
+    assert outcome.had_error is True
+    assert "not terminal" in (outcome.error_text or "")
+
+
+def test_run_execute_with_valid_footer_succeeds(tmp_path, monkeypatch, isolated_agy):
+    wrapper = _make_wrapper(tmp_path, FAKE_AGY_PRINT)
+    monkeypatch.setenv("AGY_TEST_REPLY", "Applied patches.\nAGY_MCP_STATUS: COMPLETE\n")
+    backend = AgyPrintBackend(bin_override=str(wrapper))
+    req = BridgeRequest(
+        prompt="patch file", cwd=str(tmp_path), mode="execute", allow_write=True
+    )
+    result = backend.run(req, log_path=tmp_path / "x.log")
+    assert result.exit_code == 0
+    assert result.had_incomplete_error is False
+    assert result.events[-1].subtype == "success"
+    assistants = [e for e in result.events if e.type == "assistant"]
+    assert len(assistants) == 1
+    assert assistants[0].text == "Applied patches."
+    assert "AGY_MCP_STATUS" not in assistants[0].text
+
+
+def test_run_execute_with_missing_footer_fails(tmp_path, monkeypatch, isolated_agy):
+    wrapper = _make_wrapper(tmp_path, FAKE_AGY_PRINT)
+    monkeypatch.setenv("AGY_TEST_REPLY", "I narrated what I did but emitted no footer.")
+    backend = AgyPrintBackend(bin_override=str(wrapper))
+    req = BridgeRequest(
+        prompt="patch file", cwd=str(tmp_path), mode="execute", allow_write=True
+    )
+    result = backend.run(req, log_path=tmp_path / "x.log")
+    assert result.had_incomplete_error is True
+    assert "missing required AGY_MCP_STATUS footer" in (result.incomplete_error_text or "")
+    assert result.events[-1].subtype == "incomplete_response"
+
+
+def test_run_empty_output_fails_structured(tmp_path, monkeypatch, isolated_agy):
+    wrapper = _make_wrapper(tmp_path, FAKE_AGY_PRINT)
+    monkeypatch.setenv("AGY_TEST_REPLY", "")
+    backend = AgyPrintBackend(bin_override=str(wrapper))
+    req = BridgeRequest(prompt="ping", cwd=str(tmp_path), mode="ask")
+    result = backend.run(req, log_path=tmp_path / "x.log")
+    assert result.had_incomplete_error is True
+    assert result.incomplete_error_text == "incomplete_response: empty output"
+    assert result.events[-1].subtype == "incomplete_response"

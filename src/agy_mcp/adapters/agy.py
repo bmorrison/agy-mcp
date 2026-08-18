@@ -39,7 +39,14 @@ from agy_mcp.adapters.base import (
     has_flag,
     resolve_cwd,
 )
-from agy_mcp.models import BackendName, BridgeRequest, CanonicalEvent, Capability
+from agy_mcp.models import (
+    BackendName,
+    BridgeRequest,
+    CanonicalEvent,
+    Capability,
+    Mode,
+)
+from agy_mcp.safety import SafetyPolicy
 from agy_mcp.utils import (
     augment_path_env_for_windows,
     is_windows,
@@ -142,6 +149,164 @@ class AgyAuthSource:
     path: Path
 
 
+_STATUS_FOOTER_PATTERN = re.compile(
+    r"^AGY_MCP_STATUS:\s*(COMPLETE|INCOMPLETE(?:\s+(.*))?)$",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FooterParseOutcome:
+    clean_text: str
+    is_complete: bool
+    had_error: bool
+    error_kind: str | None
+    error_text: str | None
+    reason: str | None
+
+
+def build_preamble(mode: Mode) -> str:
+    """Build a concise, mode-aware system preamble injected into agy prompts."""
+
+    lines = [
+        "[System Context]",
+        f"Mode: {mode}.",
+        "Respect the working directory (cwd) and workspace context.",
+        "Act directly to accomplish the requested task rather than merely narrating or explaining.",
+    ]
+    if mode == "execute":
+        lines.append(
+            "Apply all required file edits directly in the workspace. "
+            "When finished, your final response MUST end with exactly one terminal status line on its own line:\n"
+            "AGY_MCP_STATUS: COMPLETE\n"
+            "or\n"
+            "AGY_MCP_STATUS: INCOMPLETE <reason>"
+        )
+    elif mode == "long":
+        lines.append(
+            "Perform the detached background task directly. "
+            "When finished, your final response MUST end with exactly one terminal status line on its own line:\n"
+            "AGY_MCP_STATUS: COMPLETE\n"
+            "or\n"
+            "AGY_MCP_STATUS: INCOMPLETE <reason>"
+        )
+    elif mode == "ask":
+        lines.append("Read-only. Answer the question directly and concisely. Do not modify files.")
+    elif mode == "plan":
+        lines.append("Propose an actionable, step-by-step plan. Do not modify files.")
+    elif mode == "prototype":
+        lines.append("Draft changes as unified diffs against HEAD for review. Do not modify files directly.")
+    elif mode == "review":
+        lines.append("Review code/diffs with severity (P0-P3) and file:line citations. Do not modify files.")
+    elif mode == "browser":
+        lines.append("Perform requested web/browser research read-only. Do not modify files.")
+    else:
+        lines.append("Do not modify files unless explicitly requested.")
+    return "\n".join(lines)
+
+
+def parse_footer_and_validate(
+    raw_text: str,
+    mode: Mode,
+    safety: SafetyPolicy | None = None,
+) -> FooterParseOutcome:
+    """Parse and strip AGY_MCP_STATUS footer, enforcing completion semantics."""
+
+    stripped_raw = raw_text.strip()
+    if not stripped_raw:
+        return FooterParseOutcome(
+            clean_text="",
+            is_complete=False,
+            had_error=True,
+            error_kind="incomplete_response",
+            error_text="incomplete_response: empty output",
+            reason="empty output",
+        )
+
+    matches = list(_STATUS_FOOTER_PATTERN.finditer(raw_text))
+
+    if len(matches) > 1:
+        clean_text = _STATUS_FOOTER_PATTERN.sub("", raw_text).rstrip()
+        return FooterParseOutcome(
+            clean_text=clean_text,
+            is_complete=False,
+            had_error=True,
+            error_kind="incomplete_response",
+            error_text="incomplete_response: ambiguous or multiple AGY_MCP_STATUS footers in output",
+            reason="multiple footers",
+        )
+
+    if len(matches) == 1:
+        match = matches[0]
+        trailing = raw_text[match.end():]
+        if trailing.strip():
+            clean_text = _STATUS_FOOTER_PATTERN.sub("", raw_text).rstrip()
+            return FooterParseOutcome(
+                clean_text=clean_text,
+                is_complete=False,
+                had_error=True,
+                error_kind="incomplete_response",
+                error_text="incomplete_response: AGY_MCP_STATUS footer is not terminal",
+                reason="non-terminal footer",
+            )
+
+        status_kind = match.group(1).split()[0].upper()
+        raw_reason = match.group(2) or ""
+        clean_text = raw_text[:match.start()].rstrip()
+
+        if status_kind == "COMPLETE":
+            return FooterParseOutcome(
+                clean_text=clean_text,
+                is_complete=True,
+                had_error=False,
+                error_kind=None,
+                error_text=None,
+                reason=None,
+            )
+        elif status_kind.startswith("INCOMPLETE"):
+            clean_reason = (
+                safety.redact(raw_reason.strip())
+                if (safety is not None and raw_reason.strip())
+                else (raw_reason.strip() or "unspecified reason")
+            )
+            return FooterParseOutcome(
+                clean_text=clean_text,
+                is_complete=False,
+                had_error=True,
+                error_kind="incomplete_response",
+                error_text=f"incomplete_response: {clean_reason}",
+                reason=clean_reason,
+            )
+        else:
+            return FooterParseOutcome(
+                clean_text=clean_text,
+                is_complete=False,
+                had_error=True,
+                error_kind="incomplete_response",
+                error_text=f"incomplete_response: invalid footer status {status_kind!r}",
+                reason="invalid footer status",
+            )
+
+    if mode in ("execute", "long"):
+        return FooterParseOutcome(
+            clean_text=raw_text.rstrip(),
+            is_complete=False,
+            had_error=True,
+            error_kind="incomplete_response",
+            error_text="incomplete_response: missing required AGY_MCP_STATUS footer",
+            reason="missing required footer",
+        )
+
+    return FooterParseOutcome(
+        clean_text=raw_text.rstrip(),
+        is_complete=True,
+        had_error=False,
+        error_kind=None,
+        error_text=None,
+        reason=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -188,6 +353,8 @@ class AgyPrintBackend(BaseAdapter):
         cap.supports_dangerously_skip_permissions = has_flag(
             text, "--dangerously-skip-permissions"
         )
+        cap.supports_new_project = has_flag(text, "--new-project")
+        cap.supports_mode = has_flag(text, "--mode")
         # agy v1.0.0 has no JSON / stream-json output today; surface explicitly.
         cap.supports_streaming = False
         cap.supports_tool_events = False
@@ -202,6 +369,14 @@ class AgyPrintBackend(BaseAdapter):
             cap.warnings.append(
                 "`agy --print` not detected in --help; this build of agy may not "
                 "support non-interactive mode."
+            )
+        if not cap.supports_new_project:
+            cap.warnings.append(
+                "`agy --new-project` not detected in --help; proceeding without it."
+            )
+        if not cap.supports_mode:
+            cap.warnings.append(
+                "`agy --mode` not detected in --help; omitting --mode flag."
             )
         if account_issue := detect_agy_account_issue():
             cap.warnings.append(account_issue)
@@ -272,7 +447,7 @@ class AgyPrintBackend(BaseAdapter):
         # look like flags.
         argv: list[str] = [
             cap.bin_path,
-            f"--print={self._prepare_prompt(request.prompt)}",
+            f"--print={self._prepare_prompt(request)}",
         ]
 
         if cap.supports_print_timeout:
@@ -289,16 +464,32 @@ class AgyPrintBackend(BaseAdapter):
                 # above: session_id is caller-supplied and could be crafted
                 # to look like a flag.
                 argv += [f"--conversation={request.session_id}"]
+        elif cap.supports_new_project:
+            argv.append("--new-project")
         elif cap.supports_continue and request.backend == "agy":
             # Only auto-continue when the caller explicitly chose the agy
             # backend and gave no session id; for auto/gemini routing the
             # supervisor should set session_id explicitly to avoid surprises.
             pass  # do not auto-add --continue; require explicit session_id
+
+        if cap.supports_mode:
+            mode_flag = "accept-edits" if request.mode == "execute" else "plan"
+            argv += ["--mode", mode_flag]
         return argv
 
-    @staticmethod
-    def _prepare_prompt(prompt: str) -> str:
-        return windows_escape(prompt) if is_windows() else prompt
+    @classmethod
+    def _prepare_prompt(
+        cls, request_or_prompt: BridgeRequest | str, *, mode: Mode = "ask"
+    ) -> str:
+        if isinstance(request_or_prompt, BridgeRequest):
+            prompt = request_or_prompt.prompt
+            req_mode = request_or_prompt.mode
+        else:
+            prompt = str(request_or_prompt)
+            req_mode = mode
+        preamble = build_preamble(req_mode)
+        full_prompt = f"{preamble}\n\n[User Request]\n{prompt}"
+        return windows_escape(full_prompt) if is_windows() else full_prompt
 
     # ------------------------------------------------------------------
     # Run
@@ -505,7 +696,9 @@ class AgyPrintBackend(BaseAdapter):
         stdout_text = "".join(ctx.stdout_buf)
         stderr_text = "".join(ctx.stderr_buf)
 
-        if stdout_text.strip():
+        outcome = parse_footer_and_validate(stdout_text, request.mode, self.safety)
+
+        if outcome.clean_text:
             self._emit(
                 ctx,
                 CanonicalEvent(
@@ -513,8 +706,30 @@ class AgyPrintBackend(BaseAdapter):
                     subtype="text",
                     session_id=ctx.seen_session_id[0],
                     role="assistant",
-                    text=stdout_text,
-                    content=[{"type": "text", "text": stdout_text}],
+                    text=outcome.clean_text,
+                    content=[{"type": "text", "text": outcome.clean_text}],
+                ),
+            )
+
+        if (
+            outcome.had_error
+            and exit_code == 0
+            and not ctx.had_upstream_error
+            and not timed_out
+            and not cancelled
+        ):
+            with ctx.lock:
+                if not ctx.had_incomplete_error:
+                    ctx.had_incomplete_error = True
+                    ctx.first_incomplete_error = outcome.error_text
+            self._emit(
+                ctx,
+                CanonicalEvent(
+                    type="error",
+                    subtype="incomplete_response",
+                    session_id=ctx.seen_session_id[0],
+                    text=outcome.error_text,
+                    metadata={"error_kind": "incomplete_response"},
                 ),
             )
 
@@ -524,6 +739,7 @@ class AgyPrintBackend(BaseAdapter):
             and not timed_out
             and not cancelled
             and not ctx.had_upstream_error
+            and not ctx.had_incomplete_error
         ):
             self._emit(
                 ctx,
@@ -548,13 +764,18 @@ class AgyPrintBackend(BaseAdapter):
                 # API error. Promote to ``upstream_error`` so callers do
                 # not mis-read silence as success.
                 subtype = "upstream_error"
+            elif ctx.had_incomplete_error:
+                subtype = "incomplete_response"
             else:
                 subtype = "error"
-            # Prefer the first upstream error message captured by the klog
-            # tail (already redacted); fall back to stderr otherwise. Keeps
-            # the result envelope's ``text`` field human-readable when agy
-            # itself produced no stderr.
-            error_text = ctx.first_upstream_error or self.safety.redact(stderr_text)
+            # Prefer the first upstream or incomplete error message;
+            # fall back to stderr otherwise. Keeps the result envelope's
+            # ``text`` field human-readable when agy itself produced no stderr.
+            error_text = (
+                ctx.first_upstream_error
+                or ctx.first_incomplete_error
+                or self.safety.redact(stderr_text)
+            )
             self._emit(
                 ctx,
                 CanonicalEvent(
@@ -569,6 +790,7 @@ class AgyPrintBackend(BaseAdapter):
                         "timed_out": timed_out,
                         "cancelled": cancelled,
                         "had_upstream_error": ctx.had_upstream_error,
+                        "had_incomplete_error": ctx.had_incomplete_error,
                     },
                 ),
             )
@@ -578,7 +800,7 @@ class AgyPrintBackend(BaseAdapter):
             session_id=ctx.seen_session_id[0],
             exit_code=exit_code,
             duration_ms=duration_ms,
-            stdout_tail=truncate_middle(stdout_text, max_chars=request.max_output_chars),
+            stdout_tail=truncate_middle(outcome.clean_text, max_chars=request.max_output_chars),
             stderr_tail=truncate_middle(
                 self.safety.redact(stderr_text), max_chars=request.max_output_chars
             ),
@@ -586,6 +808,8 @@ class AgyPrintBackend(BaseAdapter):
             artifacts=[],
             had_upstream_error=ctx.had_upstream_error,
             upstream_error_text=ctx.first_upstream_error,
+            had_incomplete_error=ctx.had_incomplete_error,
+            incomplete_error_text=ctx.first_incomplete_error,
         )
 
     # ------------------------------------------------------------------

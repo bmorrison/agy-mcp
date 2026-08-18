@@ -649,7 +649,15 @@ class Supervisor:
         else:
             session_id_resolved = result.session_id or request.session_id
             exit_code = result.exit_code
-            if result.exit_code == 0 and result.had_upstream_error:
+            if result.had_incomplete_error:
+                status = "failed"
+                if not error:
+                    error = self.safety.redact(
+                        result.incomplete_error_text
+                        or _pick_error_from_events(result.events)
+                        or "incomplete_response",
+                    )
+            elif result.exit_code == 0 and result.had_upstream_error:
                 status = "upstream_error"
                 if not error:
                     error = self.safety.redact(

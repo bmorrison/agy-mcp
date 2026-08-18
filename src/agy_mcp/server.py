@@ -511,9 +511,9 @@ async def agy_tool(
 @mcp.tool(
     name="agy_continue",
     description=(
-        "Continue an existing agy session. Identical to `agy` except "
-        "SESSION_ID is required and the underlying adapter resumes the "
-        "Antigravity conversation."
+        "Continue an existing agy session. Resumes the conversation only; "
+        "the caller supplies the working directory (cd) for the turn. "
+        "Requires SESSION_ID. Empty continuation output is treated as a failure."
     ),
 )
 async def agy_continue_tool(
@@ -678,7 +678,9 @@ def agy_status_tool(job_id: str) -> StatusToolResponse:
 @mcp.tool(
     name="agy_read",
     description=(
-        "Read events from a job's event log. ``since`` is the 0-based offset; "
+        "Read events from a job's event log. Exposes final and log-derived "
+        "events; does not provide live intermediate model reasoning or "
+        "tool-event streaming. ``since`` is the 0-based offset; "
         "``translate`` may be 'raw', 'claude', or 'codex' to wire-format the "
         "events (default returns canonical events as dicts). ``job_id`` may be "
         "a full id or unique prefix."
