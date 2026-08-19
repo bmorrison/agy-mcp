@@ -56,6 +56,8 @@ while True:
 result = agy_result(job_id)
 
 # Read events (raw canonical envelope by default):
+# Note: agy_read exposes final and log-derived events; it does not provide
+# live intermediate model reasoning or tool-event streaming.
 events = agy_read(job_id)
 
 # Or translated for your protocol:
@@ -64,6 +66,28 @@ events = agy_read(job_id, translate="claude")
 # Cancel a runaway job:
 agy_cancel(job_id)
 ```
+
+The metadata tools accept a full `job_id` or a unique prefix. For example,
+`agy_status("job_177986")` resolves to the matching stored job when exactly
+one id starts with that prefix; ambiguous prefixes return `success=false`
+with an explicit ambiguity error.
+
+## Invocations, Continuations, and Completion Semantics
+
+### Fresh vs Resumed Calls
+- Fresh calls pass `--new-project` (when supported) to ensure an isolated conversation.
+- Resumed calls (`SESSION_ID` or `agy_continue`) pass `--conversation=<id>` and omit `--new-project`.
+- In `agy_continue`, the conversation history is resumed in Antigravity while the caller supplies the working directory (`cd`) for the current turn. Empty output from a continuation is treated as a failure.
+
+### Mode Mapping & Preamble Injection
+- The bridge injects a concise, mode-aware preamble into every prompt.
+- When supported by the agy CLI, `execute` mode maps to `--mode accept-edits`, while all non-write modes map to `--mode plan`. Older CLIs lacking these flags omit them gracefully with warnings.
+
+### Terminal Status Footers
+- `execute` and `long` requests require exactly one terminal footer:
+  `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+- The footer is stripped from `agent_messages`.
+- Empty output, missing required footer, or an `INCOMPLETE` footer produces a structured failed result with `status="failed"` and error kind `incomplete_response`.
 
 ## Response envelope
 
@@ -88,7 +112,9 @@ Every CLI invocation prints a single JSON line on stdout:
     "model": "...",
     "output_protocol": "claude",
     "supports_streaming": false,
-    "supports_tool_events": false
+    "supports_tool_events": false,
+    "supports_new_project": true,
+    "supports_mode": true
   },
   "command_preview": null,
   "log_path": "/path/to/agy.log",
@@ -129,6 +155,7 @@ Higher precedence flags beat env vars beat config.toml.
 `success=false` and `error` will contain a redacted human-readable
 sentence. Common categories:
 
+- **`incomplete_response`** — output was empty, missing required `AGY_MCP_STATUS` footer, or returned `INCOMPLETE <reason>`.
 - **`agy/gemini not found on PATH`** — install per
   `https://docs.astral.sh/uv/getting-started/installation/` (uv) then
   `uv tool install --from git+https://github.com/Boulea7/agy-mcp.git`.

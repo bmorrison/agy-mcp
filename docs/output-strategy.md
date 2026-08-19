@@ -213,6 +213,22 @@ The translator is stateless — it consumes one canonical event at a
 time and emits zero, one, or many translated events depending on the
 target protocol.
 
+## Terminal Status Footers & Completion Validation
+
+For `execute` and `long` modes, the adapter enforces completion semantics:
+- The worker is prompted to end with exactly one terminal status line:
+  `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+- The adapter parses and strips this footer from user-visible `agent_messages`.
+- If output is empty, if the required footer is missing on `execute` or `long` modes, or if an `INCOMPLETE` footer is returned, the adapter records a structured failed result with `had_incomplete_error=True` and emits a CanonicalEvent with `subtype="incomplete_response"`.
+- Both the synchronous `bridge` and background `supervisor` surface this as `status="failed"` with error text `incomplete_response: ...`.
+
+## Event Scope & `agy_read`
+
+`agy_read` reads events from the supervisor-managed `events.jsonl` event log on disk:
+- It exposes final and log-derived events (lifecycle events from klog, assistant messages, result events).
+- It does **not** provide live intermediate model reasoning or tool-event streaming.
+- Subagents written to transcript logs are watched opportunistically, but token streaming is not available from `agy --print`.
+
 ## Per-call truncation
 
 `max_output_chars` (default `60000`) caps the buffered

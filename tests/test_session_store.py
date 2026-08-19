@@ -22,7 +22,12 @@ def test_generate_job_id_is_unique():
 
 def test_create_and_get_job_round_trip(tmp_session_root: Path):
     store = SessionStore(tmp_session_root)
-    record = store.create_job(cwd="/tmp/repo", request={"prompt": "x"})
+    record = store.create_job(
+        cwd="/tmp/repo",
+        request={"prompt": "x"},
+        pid=1234,
+        extra={"supervisor": {"pid": 1234, "instance_id": "abc"}},
+    )
     assert record.job_id.startswith("job_")
     fetched = store.get_job(record.job_id)
     assert fetched is not None
@@ -30,6 +35,8 @@ def test_create_and_get_job_round_trip(tmp_session_root: Path):
     assert fetched.status == "running"
     assert fetched.cwd == "/tmp/repo"
     assert fetched.request == {"prompt": "x"}
+    assert fetched.pid == 1234
+    assert fetched.extra["supervisor"] == {"pid": 1234, "instance_id": "abc"}
 
 
 def test_finalize_job_writes_status_and_exit_code(tmp_session_root: Path):
@@ -179,6 +186,31 @@ def test_find_by_session_id_returns_most_recent(tmp_session_root: Path):
     found = store.find_by_session_id("conv-x")
     assert found is not None
     assert found.job_id == newer.job_id
+
+
+def test_resolve_job_reference_accepts_exact_id_or_unique_prefix(tmp_session_root: Path):
+    store = SessionStore(tmp_session_root)
+    record = store.create_job(job_id="job_prefix_target")
+
+    assert store.resolve_job_reference(record.job_id) == record
+    assert store.resolve_job_reference("job_prefix_tar") == record
+
+
+def test_resolve_job_reference_rejects_ambiguous_prefix(tmp_session_root: Path):
+    store = SessionStore(tmp_session_root)
+    store.create_job(job_id="job_shared_alpha")
+    store.create_job(job_id="job_shared_beta")
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        store.resolve_job_reference("job_shared")
+
+
+def test_resolve_job_reference_rejects_bare_prefix(tmp_session_root: Path):
+    store = SessionStore(tmp_session_root)
+    store.create_job(job_id="job_shared_alpha")
+
+    with pytest.raises(ValueError, match="job_id reference"):
+        store.resolve_job_reference("job_")
 
 
 def test_get_job_missing_returns_none(tmp_session_root: Path):

@@ -38,29 +38,47 @@ The bridge prints one JSON line on stdout: `{"success": true,
 
 ## Modes
 
-| Mode | Use it for | Worktree | Writes |
-|------|-----------|----------|--------|
-| `ask` (default) | Q&A, code reading | no | no |
-| `plan` | Multi-step planning | no | no |
-| `prototype` | Diff-only suggestions | optional | no |
-| `review` | Critique a staged change | no | no |
-| `execute` | Apply edits in a worktree | yes | requires `--allow-write` |
-| `browser` | Research with browsing | no | no |
-| `long` | Detached agent loop | no | varies |
+| Mode | Use it for | Worktree | Writes | CLI mode mapping |
+|------|-----------|----------|--------|-------------------|
+| `ask` (default) | Q&A, code reading | no | no | `agy --mode plan` |
+| `plan` | Multi-step planning | no | no | `agy --mode plan` |
+| `prototype` | Diff-only suggestions | optional | no | `agy --mode plan` |
+| `review` | Critique a staged change | no | no | `agy --mode plan` |
+| `execute` | Apply edits in a worktree | yes | requires `--allow-write` | `agy --mode accept-edits` |
+| `browser` | Research with browsing | no | no | `agy --mode plan` |
+| `long` | Detached agent loop | no | varies | `agy --mode plan` |
 
-## Multi-turn
+If the installed `agy` binary does not support `--mode` or `--new-project`,
+the bridge retains backward-compatible operation and emits clear warnings.
+
+## Automatic Preamble & Terminal Status Footers
+
+Every invocation receives a concise, mode-aware system preamble instructing
+Antigravity to act directly in the supplied working directory.
+
+For `execute` and `long` modes, the worker must end its final response
+with exactly one terminal footer:
+`AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+The bridge validates and strips this footer from user-visible agent text.
+Empty output, a missing required footer, or an `INCOMPLETE` footer results
+in a structured failure (`status="failed"`, error kind `incomplete_response`).
+
+## Multi-turn & Continuations
 
 Capture and reuse `SESSION_ID`:
 
 ```bash
-# Turn 1
+# Turn 1 (Fresh invocation: passes --new-project when supported)
 python scripts/agy_bridge.py --cd /proj --PROMPT "Find race conditions in src/queue/"
 # → {"SESSION_ID": "abc-123", ...}
 
-# Turn 2
+# Turn 2 (Resumed invocation: passes --conversation=abc-123, never --new-project)
 python scripts/agy_bridge.py --cd /proj --SESSION_ID abc-123 \
   --PROMPT "Propose a minimal fix for the worst one."
 ```
+
+When calling `agy_continue`, Antigravity resumes the conversation while
+the caller provides `cd` for each turn. Empty continuation output fails.
 
 ## Detached long jobs
 
@@ -69,6 +87,9 @@ surface (`agy_start` / `agy_status` / `agy_result` / `agy_read` /
 `agy_cancel` / `agy_sessions`) over polling the CLI in a shell loop. The supervisor
 handles worker thread lifecycle, log spooling, and cross-platform
 process-group cleanup.
+
+Note that `agy_read` exposes final and log-derived events; it does not
+provide live intermediate model reasoning or tool-event streaming.
 
 ## Output protocols
 
@@ -84,6 +105,15 @@ under `SafetyPolicy`, and refuses destructive prompts even with
 `--allow-write`. The doctor (`agy_doctor` MCP tool, or
 `python -m agy_mcp.doctor`) reports the environment without leaking
 secrets.
+
+## Review prompt profile
+
+For ordinary code review, call `agy(..., mode="review")` with a narrow
+scope and ask for P0/P1/P2 findings first. For high-risk changes, use
+the adversarial review prompt profile in `references/prompt-patterns.md`:
+ask Antigravity to attack correctness, security boundaries, concurrency,
+state persistence, rollback, and missing tests. Treat it as a stricter
+prompt, not a separate bridge mode.
 
 ## Detailed references
 

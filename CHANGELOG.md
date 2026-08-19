@@ -6,6 +6,25 @@ uses [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Antigravity runtime reliability and flag detection:
+  - Probed and detected `agy --new-project` and `agy --mode` capabilities.
+  - Fresh agy invocations pass `--new-project` when supported; resumed invocations pass `--conversation=<id>` and omit `--new-project`.
+  - Mapped `execute` mode to `agy --mode accept-edits` and non-write modes (`ask`, `plan`, `prototype`, `review`, `browser`, `long`) to `agy --mode plan`.
+  - Retained backward-compatible fallback with clear warnings for older agy builds lacking these flags.
+- Injected a concise, mode-aware system preamble into every agy request.
+- Enforced terminal status footer (`AGY_MCP_STATUS: COMPLETE` / `AGY_MCP_STATUS: INCOMPLETE <reason>`) for `execute` and `long` modes:
+  - Automatically stripped status footers from user-visible agent text.
+  - Handled empty output, missing required footers, and INCOMPLETE footers as structured failed results with error kind `incomplete_response`.
+- Documented and enforced `agy_continue` semantics: resumes conversation only with caller-supplied `cd` per turn; empty output fails.
+- Documented `agy_read` event boundaries: exposes final and log-derived events without live intermediate model reasoning or tool-event streaming.
+- Release artifact dependency bounding audit to ensure `<2` upper bound on `mcp`.
+
+### Changed
+
+- Pinned `mcp[cli]>=1.21.2,<2` dependency in `pyproject.toml` and updated `uv.lock`.
+
 ## [0.1.8] — 2026-05-27
 
 ### Added

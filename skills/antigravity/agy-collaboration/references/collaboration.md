@@ -13,10 +13,16 @@ that translation faithful.
 | plan | Goal restatement | Numbered steps | Out-of-scope list |
 | prototype | Diff header | Unified diff | "Tests touched:" line |
 | review | Verdict line | Numbered findings | "No further findings." or open question |
-| execute | "Worktree: <path>" | Files touched, commands run | Test result + revert summary if needed |
-| long | One-line mission echo | Step log | Next-step intention |
+| execute | "Worktree: <path>" | Files touched, edits applied | `AGY_MCP_STATUS: COMPLETE` (or `INCOMPLETE <reason>`) |
+| long | One-line mission echo | Step log | `AGY_MCP_STATUS: COMPLETE` (or `INCOMPLETE <reason>`) |
 
 ## Common failure modes (don't do these)
+
+### Omitting `AGY_MCP_STATUS` in execute or long mode
+In `execute` and `long` modes, the bridge strictly requires exactly one
+terminal footer: `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+Missing footers or empty output cause the bridge to flag the turn as
+`status="failed"` with error kind `incomplete_response`.
 
 ### "Let me know if you want me to continue."
 The driving agent will continue if it wants to — it has `SESSION_ID`.
@@ -48,13 +54,13 @@ browser cookies, OS keychain entries when the driving agent is in
 
 ## Structured-failure envelope (what the driving agent sees on error)
 
-If your turn ends with an error, the bridge emits:
+If your turn ends with an error or incomplete status, the bridge emits:
 
 ```json
 {
   "success": false,
   "SESSION_ID": "abc-123",
-  "error": "<redacted, one-line description>",
+  "error": "incomplete_response: <redacted reason>",
   "agent_messages": "",
   "cwd": "/proj",
   "adapter": {"backend": "agy", "version": "1.0.0"}

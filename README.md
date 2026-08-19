@@ -118,13 +118,13 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 
 | 工具 | 用途 |
 |---|---|
-| `agy` | 同步一次性调用（PROMPT / cd / sandbox / SESSION_ID + `mode` / `backend` / `output_protocol` / `worktree` / `allow_write` / `extra_env`） |
-| `agy_continue` | 续 `SESSION_ID` |
+| `agy` | 同步调用（PROMPT / cd / sandbox / SESSION_ID + `mode` / `backend` / `output_protocol` / `worktree` / `allow_write` / `extra_env`；注入 mode 提示词，新会话带 `--new-project`） |
+| `agy_continue` | 续 `SESSION_ID` 会话（仅恢复对话上下文，调用方需指定每轮 `cd`，空输出视为失败） |
 | `agy_start` | 后台启动长任务，立即返回 `job_id` |
-| `agy_status` | 查 job 状态：running / completed / failed / cancelled / upstream_error |
-| `agy_read` | 读 job 事件流（raw / claude / codex 三协议） |
-| `agy_result` | 取已完成 job 的结果；不传 `job_id` 时返回最近完成任务 |
-| `agy_cancel` | 跨平台 process group 终止 |
+| `agy_status` | 查 job 状态：running / completed / failed / cancelled / upstream_error；`job_id` 可用唯一前缀 |
+| `agy_read` | 读 job 最终与日志衍生事件流（raw / claude / codex 三协议，不提供模型实时推理或工具事件流）；`job_id` 可用唯一前缀 |
+| `agy_result` | 取已完成 job 的结果；不传 `job_id` 时返回最近完成任务；传参可用唯一前缀 |
+| `agy_cancel` | 跨平台 process group 终止；`job_id` 可用唯一前缀 |
 | `agy_sessions` | 列最近 session |
 | `agy_doctor` | 环境 + 鉴权 + capability 探测（不泄漏 secrets） |
 | `agy_install_skill` | 把 SKILL bundle 装到 Claude / Codex / Antigravity 目录 |

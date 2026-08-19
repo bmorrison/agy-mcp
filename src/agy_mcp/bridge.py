@@ -517,8 +517,14 @@ def _run_unsafe(
             "agent_messages truncated from "
             f"{original_len} to {len(assistant_text)} chars by max_output_chars"
         )
-    success = result.exit_code == 0 and not result.had_upstream_error
-    if result.had_upstream_error and result.exit_code == 0:
+    success = (
+        result.exit_code == 0
+        and not result.had_upstream_error
+        and not result.had_incomplete_error
+    )
+    if result.had_incomplete_error:
+        status = "failed"
+    elif result.had_upstream_error and result.exit_code == 0:
         # agy v1.0.0 swallows upstream API errors and exits 0. The adapter
         # already promoted the result envelope's subtype to ``upstream_error``
         # via klog detection; surface the same failure at the bridge top level
@@ -533,6 +539,8 @@ def _run_unsafe(
 
     if success:
         error_field: str | None = None
+    elif result.had_incomplete_error and result.incomplete_error_text:
+        error_field = result.incomplete_error_text
     elif result.had_upstream_error and result.upstream_error_text:
         error_field = result.upstream_error_text
     else:

@@ -42,11 +42,24 @@ Always pass `output_protocol="codex"` so the bridge emits
 Codex's exec-json parser handles directly. The default is `claude`,
 which works but adds an event-shape conversion step.
 
-### Multi-turn
+### Multi-turn & Continuation
 
 Capture `SESSION_ID` from the first response and pass it back via
-`agy_continue(SESSION_ID, PROMPT, ...)`. Antigravity holds the
-conversation state; Codex does not need to replay history.
+`agy_continue(SESSION_ID, PROMPT, cd=...)`. Antigravity holds the
+conversation state; Codex supplies the working directory (`cd`) for
+each turn without replaying history. Empty continuation output is
+treated as a failure.
+
+### Reliability & Completion Semantics
+
+- Every invocation receives an automatic, mode-aware system preamble.
+- `execute` and `long` modes require a terminal status footer
+  (`AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`).
+  The bridge parses and strips this footer from user-visible output.
+  Empty output or missing/incomplete footers return `status="failed"`
+  with error kind `incomplete_response`.
+- `agy_read` exposes final and log-derived events; it does not provide
+  live intermediate model reasoning or tool-event streaming.
 
 ### Safety floor
 

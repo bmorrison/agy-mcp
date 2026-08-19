@@ -37,11 +37,14 @@ JSON envelope stays useful:
      file:line. Skip nits.
    - `execute`: you are in a temp git worktree. Touch only the
      requested files; if a test fails, revert and report. Do not
-     "fix and continue".
+     "fix and continue". End your final response with exactly one
+     terminal status line:
+     `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`
    - `long`: detached, polled by the supervisor. Emit a one-line
      progress note every few significant steps so the supervisor
      surfaces something useful. Do not retry the same failed op
-     more than 3 times.
+     more than 3 times. End your final response with:
+     `AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`
 
 5. Stable SESSION_ID across turns. The driving agent will pass it
    back; you do not need to ask "is this the same conversation".

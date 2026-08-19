@@ -35,41 +35,62 @@ Output is a single JSON line on stdout: `{"success": true, "SESSION_ID":
 
 ## Modes
 
-`--mode` controls the agent persona and downstream safety policy:
+`--mode` controls the agent persona, CLI flag mapping, and downstream safety policy:
 
-| Mode | Use it for | Worktree? | Writes? |
-|------|-----------|-----------|---------|
-| `ask` (default) | Q&A, code reading, design discussion | no | no |
-| `plan` | Multi-step planning, breakdown | no | no |
-| `prototype` | Generate diffs for review | optional | no |
-| `review` | Code review of staged changes | no | no |
-| `execute` | Make file edits in the workspace | **yes** | requires `--allow-write` |
-| `browser` | Interactive browsing / research | no | no |
-| `long` | Multi-hour agent loop, expect to poll status | no | no |
+| Mode | Use it for | Worktree? | Writes? | CLI mode mapping |
+|------|-----------|-----------|---------|-------------------|
+| `ask` (default) | Q&A, code reading, design discussion | no | no | `agy --mode plan` |
+| `plan` | Multi-step planning, breakdown | no | no | `agy --mode plan` |
+| `prototype` | Generate diffs for review | optional | no | `agy --mode plan` |
+| `review` | Code review of staged changes | no | no | `agy --mode plan` |
+| `execute` | Make file edits in the workspace | **yes** | requires `--allow-write` | `agy --mode accept-edits` |
+| `browser` | Interactive browsing / research | no | no | `agy --mode plan` |
+| `long` | Multi-hour agent loop, expect to poll status | no | no | `agy --mode plan` |
 
 `execute` always creates a worktree by default; combine with
 `--allow-write` to opt in to mutations. The worktree default is
 configurable in `~/.config/agy-mcp/config.toml` (see references/security.md).
+If the installed `agy` CLI lacks `--mode` or `--new-project`, the bridge
+retains backward-compatible execution and records clear warnings.
 
-## Multi-turn
+## Automatic Preamble & Terminal Status Footers
+
+Every invocation receives a concise, mode-aware system preamble telling
+Antigravity to act directly in the supplied working directory.
+
+For `execute` and `long` modes, the worker is required to end its final
+response with exactly one terminal footer:
+`AGY_MCP_STATUS: COMPLETE` or `AGY_MCP_STATUS: INCOMPLETE <reason>`.
+The bridge automatically validates and strips this footer from user-visible
+agent text. If output is empty, if the required footer is missing, or if
+an `INCOMPLETE` footer is returned, the bridge records a structured failed
+result (`status="failed"`, error kind `incomplete_response`).
+
+## Multi-turn & Continuations
 
 Capture `SESSION_ID` from the first response, then pass it back:
 
 ```bash
-# Turn 1
+# Turn 1 (Fresh invocation: passes --new-project when supported)
 python scripts/agy_bridge.py --cd "/proj" --PROMPT "Analyse src/auth/"
 # → {"SESSION_ID": "abc-123", "agent_messages": "…"}
 
-# Turn 2 (continues the same conversation)
+# Turn 2 (Resumed invocation: passes --conversation=abc-123, never --new-project)
 python scripts/agy_bridge.py --cd "/proj" --SESSION_ID abc-123 \
   --PROMPT "Now propose a refactor."
 ```
+
+When using MCP tools, `agy_continue` resumes the conversation only; the
+caller supplies the working directory (`cd`) for each turn. Empty
+continuation output is treated as a failure.
 
 ## Long jobs (start / status / result / read / cancel)
 
 For tasks that exceed a single Claude turn, use the supervisor surface
 via the MCP tools `agy_start` / `agy_status` / `agy_result` /
 `agy_read` / `agy_cancel`.
+Note that `agy_read` exposes final and log-derived events; it does not
+provide live intermediate model reasoning or tool-event streaming.
 See `references/usage.md` for full examples.
 
 ## Capability detection
@@ -93,6 +114,15 @@ unchanged. Pick the one that matches your downstream parser.
   destructive prompts even with the flag.
 - Long jobs expose `exit_code` and timing on the `JobRecord` returned
   by `agy_status`.
+
+## Review prompt profile
+
+For ordinary code review, call `agy(..., mode="review")` with a narrow
+scope and ask for P0/P1/P2 findings first. For high-risk changes, use
+the adversarial review prompt profile in `references/prompt-patterns.md`:
+ask Antigravity to attack correctness, security boundaries, concurrency,
+state persistence, rollback, and missing tests. Treat it as a stricter
+prompt, not a separate bridge mode.
 
 ## Detailed references
 
