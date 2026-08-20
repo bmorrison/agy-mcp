@@ -19,15 +19,16 @@ CLI) via `agy-mcp`. Use it when you need:
   (`agy_start` / `agy_status` / `agy_read` / `agy_cancel`).
 
 Available MCP tools (registered as `agy`, `agy_start`, `agy_continue`,
-`agy_status`, `agy_read`, `agy_cancel`, `agy_sessions`, `agy_doctor`,
-`agy_install_skill`, `agy_purge`):
+`agy_status`, `agy_read`, `agy_result`, `agy_transcript`, `agy_cancel`,
+`agy_sessions`, `agy_doctor`, `agy_install_skill`, `agy_purge`):
 
 - `agy(PROMPT, cd, mode, …)` — synchronous one-shot call (injects mode preamble; fresh calls use `--new-project`).
 - `agy_continue(SESSION_ID, PROMPT, cd, …)` — resume a prior session only; caller supplies `cd`. Empty output fails.
 - `agy_start(PROMPT, cd, mode="long", …)` — background job, returns
   `job_id`.
-- `agy_status(job_id)` / `agy_read(job_id)` / `agy_cancel(job_id)` —
-  long-job lifecycle (`agy_read` returns final/log-derived events).
+- `agy_status(job_id)` / `agy_read(job_id)` / `agy_result(job_id)` / `agy_cancel(job_id)` —
+  long-job lifecycle (`agy_read` returns final/log-derived events; `agy_result` gets finished output).
+- `agy_transcript(job_id=..., mode="progress"|"transcript")` — read Antigravity brain transcript for live progress polling or post-mortem reasoning replay.
 - `agy_doctor()` — environment + auth probe (no secrets).
 - `agy_install_skill(targets, scope, project_root)` — install the
   collaboration skill into Claude / Codex / Antigravity skill dirs.

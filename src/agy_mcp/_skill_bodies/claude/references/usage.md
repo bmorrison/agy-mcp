@@ -33,11 +33,11 @@ Notable defaults:
   field (default `60000`); the bridge truncates with a marker rather
   than returning the full buffer.
 
-## Long jobs (start / status / result / read / cancel)
+## Long jobs (start / status / result / read / transcript / cancel)
 
 The CLI bridges to an MCP tool surface. The skill should prefer the MCP
-tools (`agy_start`, `agy_status`, `agy_result`, `agy_read`, `agy_cancel`,
-`agy_sessions`) over polling the CLI because the supervisor handles
+tools (`agy_start`, `agy_status`, `agy_result`, `agy_read`, `agy_transcript`,
+`agy_cancel`, `agy_sessions`) over polling the CLI because the supervisor handles
 worker thread lifecycle, log spooling, and cross-platform process group
 cleanup.
 
@@ -46,18 +46,21 @@ cleanup.
 start = agy_start(PROMPT="big refactor", cd="/proj", mode="long")
 job_id = start["job_id"]
 
-# Poll status until completion:
+# Poll progress or status until completion:
 while True:
     st = agy_status(job_id)
     if st["record"]["status"] in {"completed", "failed", "cancelled", "upstream_error"}:
         break
+    # Optional: poll lightweight progress summary (step count, tool breakdown)
+    prog = agy_transcript(job_id=job_id, mode="progress")
 
 # Fetch the human-readable final output:
 result = agy_result(job_id)
 
+# Or inspect full post-mortem reasoning steps:
+full = agy_transcript(job_id=job_id, mode="transcript")
+
 # Read events (raw canonical envelope by default):
-# Note: agy_read exposes final and log-derived events; it does not provide
-# live intermediate model reasoning or tool-event streaming.
 events = agy_read(job_id)
 
 # Or translated for your protocol:
@@ -68,9 +71,9 @@ agy_cancel(job_id)
 ```
 
 The metadata tools accept a full `job_id` or a unique prefix. For example,
-`agy_status("job_177986")` resolves to the matching stored job when exactly
-one id starts with that prefix; ambiguous prefixes return `success=false`
-with an explicit ambiguity error.
+`agy_status("job_177986")` or `agy_transcript("job_177986")` resolves to the
+matching stored job when exactly one id starts with that prefix; ambiguous
+prefixes return `success=false` with an explicit ambiguity error.
 
 ## Invocations, Continuations, and Completion Semantics
 

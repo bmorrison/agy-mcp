@@ -136,12 +136,14 @@ Env var override: `AGY_MCP_WORKTREE_DEFAULT=0/1`.
 ### 7. Output redaction (`safety.py::SafetyPolicy.redact`)
 
 Every string that leaves the process (`error`, `warnings`,
-`agent_messages`, `installed[*].path`, `command_preview`, log lines):
+`agent_messages`, `installed[*].path`, `command_preview`, log lines,
+and all `agy_transcript` fields including `content`, `thinking`, and
+string values in `tool_calls[*].args`):
 
 - PEM blocks → `***`
 - JWT tokens → `***`
 - AWS access key IDs (`AKIA...`) → `***`
-- `Bearer <token>` / `Authorization: <scheme> <token>` → `Bearer ***` / `Authorization: <scheme> ***`. The same redaction is applied to a wider header allow-list driven by `_AUTHZ_HEADER` (`utils.py:62-66`): `Authorization`, `X-Api-Key`, `X-Auth-Token`, `X-Auth-Key`, `Api-Key`, `Apikey`, `Proxy-Authorization`, `X-Goog-Api-Key`, `X-OpenAI-Key`, `X-Anthropic-Key`.
+- `Bearer <token>` / `Authorization: <scheme> <token>` → `Bearer ***` / `Authorization: <scheme> ***`. The same redaction is applied to a wider header allow-list driven by `_AUTHZ_HEADER` (`utils.py:62-66`): `Authorization`, `X-Api-Key`, `X-Auth-Token`, `X-Auth-Key`, `Api-Key`, `Apikey`, `Proxy-Authorization`, `X-Goog-Key`, `X-OpenAI-Key`, `X-Anthropic-Key`.
 - Slack tokens (`xoxb-…`, `xoxp-…`) → `***`
 - GitHub fine-grained PATs (`github_pat_…`) → `***`
 - Generic high-entropy key=value secrets → `***`
@@ -175,6 +177,12 @@ deadlock.
 - `agy_status` / `agy_read` / `agy_result` / `agy_cancel`: `job_id` must match
   `^job_[A-Za-z0-9_-]{1,80}$`. Oversized values are rejected with a
   structured error.
+- `agy_transcript`: `conversation_id` validated with a strict UUID
+  regex (`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`),
+  rejecting path traversal sequences. `mode` restricted to `{"progress", "transcript"}`.
+  `max_bytes` bounded between 1,000 and 5,000,000. Under-the-hood file opening uses
+  `open_transcript_no_follow` (`O_NOFOLLOW` + `S_ISREG`), strictly rejecting symlinks,
+  pipes, sockets, or directories, with a 50 MB hard file-size ceiling.
 - All sync tools route through `_structured_failure` on exception —
   never a bare traceback to the caller.
 

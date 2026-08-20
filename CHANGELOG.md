@@ -8,6 +8,11 @@ uses [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added `agy_transcript` (12th MCP tool) to inspect Antigravity brain-directory transcripts (`transcript.jsonl`):
+  - `mode="progress"` for lightweight polling summaries (step counts, tool invocation breakdown, thinking cycles, prompt count, last activity timestamp).
+  - `mode="transcript"` for bounded, redacted step sequences (prompts, internal reasoning, tool calls, status).
+  - Session resolution by direct conversation UUID or supervisor `job_id` prefix.
+  - Enforced strict safety invariants: symlink rejection via `open_transcript_no_follow` (`O_NOFOLLOW` / `S_ISREG`), 50 MB file size cap, `max_bytes` parameter clamping, and sensitive data scrubbing via `SafetyPolicy.redact`.
 - Antigravity runtime reliability and flag detection:
   - Probed and detected `agy --new-project` and `agy --mode` capabilities.
   - Fresh agy invocations pass `--new-project` when supported; resumed invocations pass `--conversation=<id>` and omit `--new-project`.

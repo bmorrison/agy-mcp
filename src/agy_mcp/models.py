@@ -562,6 +562,21 @@ class PurgeToolResponse(_DictLikeEnvelope):
     remaining: int = 0
 
 
+class TranscriptToolResponse(_DictLikeEnvelope):
+    """Envelope returned by ``agy_transcript``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    error: str | None = None
+    mode: str | None = None
+    conversation_id: str | None = None
+    job_id: str | None = None
+    transcript: list[dict[str, Any]] | None = None
+    progress: dict[str, Any] | None = None
+    step_count: int = 0
+
+
 __all__ = [
     "AdapterMetadata",
     "BackendName",
@@ -581,4 +596,5 @@ __all__ = [
     "ResultToolResponse",
     "SessionsToolResponse",
     "StatusToolResponse",
+    "TranscriptToolResponse",
 ]

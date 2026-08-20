@@ -59,10 +59,16 @@ from agy_mcp.models import (
     ResultToolResponse,
     SessionsToolResponse,
     StatusToolResponse,
+    TranscriptToolResponse,
 )
 from agy_mcp.safety import SafetyPolicy
 from agy_mcp.session_store import SessionStore
 from agy_mcp.supervisor import Supervisor
+from agy_mcp.transcript import (
+    read_transcript,
+    resolve_transcript_path,
+    summarize_progress,
+)
 
 # ---------------------------------------------------------------------------
 # Module-level singletons. The FastMCP runtime imports this module exactly
@@ -1101,6 +1107,165 @@ def agy_purge_tool(days: int = 30) -> PurgeToolResponse:
 
 
 # ---------------------------------------------------------------------------
+# Tool: agy_transcript — inspect Antigravity agent transcript
+# ---------------------------------------------------------------------------
+
+_TRANSCRIPT_MODES = frozenset({"progress", "transcript"})
+_MIN_TRANSCRIPT_MAX_BYTES = 1_000
+_MAX_TRANSCRIPT_MAX_BYTES = 5_000_000
+
+
+@mcp.tool(
+    name="agy_transcript",
+    description=(
+        "Read the Antigravity agent's brain-directory transcript for a "
+        "session. Use mode='progress' for a lightweight summary (step "
+        "count, tool breakdown, last activity) suitable for live polling. "
+        "Use mode='transcript' for the full redacted step sequence "
+        "(reasoning, tool calls, prompts) for post-mortem diagnostics. "
+        "Identify the session by conversation_id (UUID) or job_id."
+    ),
+)
+def agy_transcript_tool(
+    conversation_id: str | None = None,
+    job_id: str | None = None,
+    mode: str = "progress",
+    max_bytes: int = 200_000,
+) -> TranscriptToolResponse:
+    _config, safety, store, supervisor = _ensure_state()
+
+    if mode not in _TRANSCRIPT_MODES:
+        return _wrapper_failure(
+            safety,
+            ValueError(f"mode must be 'progress' or 'transcript', got {mode!r}"),
+            TranscriptToolResponse,
+            mode=mode,
+            conversation_id=conversation_id,
+            job_id=job_id,
+        )
+
+    if (
+        not isinstance(max_bytes, int)
+        or isinstance(max_bytes, bool)
+        or max_bytes < _MIN_TRANSCRIPT_MAX_BYTES
+        or max_bytes > _MAX_TRANSCRIPT_MAX_BYTES
+    ):
+        return _wrapper_failure(
+            safety,
+            ValueError(
+                f"max_bytes must be an integer between {_MIN_TRANSCRIPT_MAX_BYTES} and {_MAX_TRANSCRIPT_MAX_BYTES}"
+            ),
+            TranscriptToolResponse,
+            mode=mode,
+            conversation_id=conversation_id,
+            job_id=job_id,
+        )
+
+    target_conv_id = conversation_id
+    resolved_job_id: str | None = None
+
+    if job_id is not None:
+        resolved_job_id, err = _resolve_job_id_reference(safety, store, job_id)
+        if err is not None:
+            return _wrapper_failure(
+                safety,
+                ValueError(err),
+                TranscriptToolResponse,
+                mode=mode,
+                job_id=job_id,
+            )
+        record = supervisor.status(resolved_job_id or job_id)
+        if record is None:
+            return _wrapper_failure(
+                safety,
+                ValueError(f"job_id {resolved_job_id or job_id!r} not found"),
+                TranscriptToolResponse,
+                mode=mode,
+                job_id=resolved_job_id or job_id,
+            )
+        if target_conv_id is None:
+            target_conv_id = record.session_id
+
+    if not target_conv_id:
+        if job_id is not None:
+            # Job exists but had no conversation bound
+            return TranscriptToolResponse(
+                success=True,
+                mode=mode,
+                job_id=resolved_job_id or job_id,
+                conversation_id=None,
+                transcript=None,
+                progress=None,
+                step_count=0,
+            )
+        return _wrapper_failure(
+            safety,
+            ValueError("conversation_id or job_id is required"),
+            TranscriptToolResponse,
+            mode=mode,
+        )
+
+    try:
+        transcript_path = resolve_transcript_path(target_conv_id)
+    except ValueError as exc:
+        return _wrapper_failure(
+            safety,
+            exc,
+            TranscriptToolResponse,
+            mode=mode,
+            conversation_id=target_conv_id,
+            job_id=resolved_job_id or job_id,
+        )
+
+    try:
+        steps = read_transcript(
+            transcript_path,
+            max_bytes=max_bytes,
+            redact_fn=safety.redact,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _wrapper_failure(
+            safety,
+            exc,
+            TranscriptToolResponse,
+            mode=mode,
+            conversation_id=target_conv_id,
+            job_id=resolved_job_id or job_id,
+        )
+
+    if not steps:
+        return TranscriptToolResponse(
+            success=True,
+            mode=mode,
+            conversation_id=target_conv_id,
+            job_id=resolved_job_id or job_id,
+            transcript=None,
+            progress=None,
+            step_count=0,
+        )
+
+    if mode == "progress":
+        prog = summarize_progress(target_conv_id, steps)
+        return TranscriptToolResponse(
+            success=True,
+            mode="progress",
+            conversation_id=target_conv_id,
+            job_id=resolved_job_id or job_id,
+            progress=prog.to_dict(),
+            step_count=len(steps),
+        )
+
+    return TranscriptToolResponse(
+        success=True,
+        mode="transcript",
+        conversation_id=target_conv_id,
+        job_id=resolved_job_id or job_id,
+        transcript=[s.to_dict() for s in steps],
+        step_count=len(steps),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1126,6 +1291,7 @@ __all__ = [
     "agy_start_tool",
     "agy_status_tool",
     "agy_tool",
+    "agy_transcript_tool",
     "mcp",
     "run",
 ]

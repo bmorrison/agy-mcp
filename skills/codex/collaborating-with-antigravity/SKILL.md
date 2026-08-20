@@ -84,12 +84,18 @@ the caller provides `cd` for each turn. Empty continuation output fails.
 
 Codex projects that run long agent loops should prefer the MCP tool
 surface (`agy_start` / `agy_status` / `agy_result` / `agy_read` /
-`agy_cancel` / `agy_sessions`) over polling the CLI in a shell loop. The supervisor
+`agy_transcript` / `agy_cancel` / `agy_sessions`) over polling the CLI in a shell loop. The supervisor
 handles worker thread lifecycle, log spooling, and cross-platform
 process-group cleanup.
 
 Note that `agy_read` exposes final and log-derived events; it does not
 provide live intermediate model reasoning or tool-event streaming.
+To inspect internal reasoning or poll live progress, use `agy_transcript`.
+
+### Inspecting Antigravity Agent Reasoning (`agy_transcript`)
+
+- **Live progress polling**: `agy_transcript(job_id=..., mode="progress")` returns step count, tool invocation breakdown, thinking cycles, and last activity.
+- **Post-mortem reasoning replay**: `agy_transcript(job_id=..., mode="transcript")` returns the full bounded, redacted sequence of reasoning steps, prompts, and tool calls.
 
 ## Output protocols
 

@@ -7,7 +7,7 @@
 
 言語：[`简体中文`](../README.md) · [`繁體中文`](README_ZH-TW.md) · [`English`](README_EN.md)
 
-> Google **Antigravity CLI**（`agy`）を 11 個の typed MCP tool として
+> Google **Antigravity CLI**（`agy`）を 12 個の typed MCP tool として
 > ラップし、任意の MCP client（Claude Code / OpenAI Codex / Cursor /
 > Cline / Continue …）から直接呼び出せるようにします。任意で Skill
 > bundle も提供し、skill 対応プラットフォームに*いつ委譲するか*、
@@ -76,7 +76,7 @@ agy-mcp という open-source MCP をインストールしてください。具�
   現在の permission mode が acceptEdits を許している場合は、そのまま進める。
 
 各 step が終わるたびに 1 行で報告する。すべて終わったら 4 行でまとめる：
-どこにインストールされたか、11 個の MCP tool が公開されたか、SKILL の
+どこにインストールされたか、12 個の MCP tool が公開されたか、SKILL の
 配置先、残っている任意項目。
 ````
 
@@ -109,7 +109,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 呼び出せる collaboration agent backend にする wrapper です。2 つの
 同等な経路を提供します：
 
-- **MCP server**：`agymcp` が FastMCP stdio 経由で 11 個の typed JSON
+- **MCP server**：`agymcp` が FastMCP stdio 経由で 12 個の typed JSON
   tool を公開します。pydantic envelope は安定して解析できます。
   **任意の MCP client で利用可能**です。
 - **Skill bundles**：`~/.claude/skills/`、`~/.agents/skills/`、
@@ -124,7 +124,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 > あります。この project は CLI の wrap、routing、isolation、audit を
 > 行うだけで、`agy` API を再実装しません。
 
-## 11 個の MCP tool
+## 12 個の MCP tool
 
 | Tool | Purpose |
 |---|---|
@@ -134,6 +134,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 | `agy_status` | job state を確認：running / completed / failed / cancelled / upstream_error。`job_id` は一意な prefix でも可 |
 | `agy_read` | job の最終およびログ派生 event stream を読む（raw / claude / codex protocols、model リアルタイム推論や tool stream は非提供）。`job_id` は一意な prefix でも可 |
 | `agy_result` | finished job result を取得。`job_id` 省略時は最新の finished job を返す。指定時は一意な prefix でも可 |
+| `agy_transcript` | Antigravity brain ディレクトリの transcript.jsonl を読み取り（progress / transcript の2モード、conversation_id または job_id 指定、自動脱敏） |
 | `agy_cancel` | cross-platform process-group cancel。`job_id` は一意な prefix でも可 |
 | `agy_sessions` | 最近の session を一覧 |
 | `agy_doctor` | env + auth + capability probe（secrets は出さない） |
@@ -149,6 +150,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 | review 用 diff | `agy(..., mode="prototype")`（`allow_write` なし） |
 | review 済み diff の適用 | `agy(..., mode="execute", allow_write=True)`（auto worktree） |
 | 数時間規模の refactor | `agy_start(..., mode="long")` して poll |
+| 実行詳細の診断 / 推論進捗のポーリング | `agy_transcript(..., mode="progress"|"transcript")` |
 | Anthropic / OpenAI conversation state が必要な作業 | 委譲しない。`agy` は独立 model / 独立 context |
 
 ## Safety floor

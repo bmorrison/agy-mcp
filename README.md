@@ -7,7 +7,7 @@
 
 语言：[`English`](docs/README_EN.md) · [`繁體中文`](docs/README_ZH-TW.md) · [`日本語`](docs/README_JA.md)
 
-> 把 Google **Antigravity CLI**（`agy`）包装成 11 个 typed MCP 工具，
+> 把 Google **Antigravity CLI**（`agy`）包装成 12 个 typed MCP 工具，
 > 任何 MCP 客户端（Claude Code / OpenAI Codex / Cursor / Cline /
 > Continue …）都能直接调用。配套可选 Skill bundle，让支持 skill 的
 > 平台学会*何时*调、*用哪个 mode*。
@@ -71,7 +71,7 @@ agy-doctor
 - 任何写入操作（包括上面这些）做之前先简短说一下要做什么，等我点头
   再执行；如果你的当前权限模式允许 acceptEdits，就直接执行。
 
-每完成一步给我一行汇报，全部完成后给出一份 4 行总结：装在哪、11 个
+每完成一步给我一行汇报，全部完成后给出一份 4 行总结：装在哪、12 个
 MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 ````
 
@@ -102,7 +102,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 把 Google 新发布的 Antigravity CLI（`agy`）包装成可被任意 MCP 客户端
 调用的协作 agent backend。两条等价路径：
 
-- **MCP server**：`agymcp` 经 FastMCP stdio 暴露 11 个 typed JSON 工具，
+- **MCP server**：`agymcp` 经 FastMCP stdio 暴露 12 个 typed JSON 工具，
   pydantic envelope 稳定可解析。**任何 MCP 客户端皆可**。
 - **Skill bundles**：装到 `~/.claude/skills/`、`~/.agents/skills/`、
   `~/.agy/skills/`，教 agent *何时*调 agy、*用哪个 mode*、注意哪些安全
@@ -114,7 +114,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 > `agy --print`，可能消耗 Antigravity 请求额度。本项目只包装、路由、
 > 隔离、审计，不重新实现 `agy` API。
 
-## 11 个 MCP 工具
+## 12 个 MCP 工具
 
 | 工具 | 用途 |
 |---|---|
@@ -124,6 +124,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 | `agy_status` | 查 job 状态：running / completed / failed / cancelled / upstream_error；`job_id` 可用唯一前缀 |
 | `agy_read` | 读 job 最终与日志衍生事件流（raw / claude / codex 三协议，不提供模型实时推理或工具事件流）；`job_id` 可用唯一前缀 |
 | `agy_result` | 取已完成 job 的结果；不传 `job_id` 时返回最近完成任务；传参可用唯一前缀 |
+| `agy_transcript` | 读 Antigravity brain-directory transcript.jsonl（progress / transcript 双模式，支持 conversation_id 或 job_id，自动脱敏） |
 | `agy_cancel` | 跨平台 process group 终止；`job_id` 可用唯一前缀 |
 | `agy_sessions` | 列最近 session |
 | `agy_doctor` | 环境 + 鉴权 + capability 探测（不泄漏 secrets） |
@@ -139,6 +140,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 | 给 review 用的 diff | `agy(..., mode="prototype")`（无 `allow_write`） |
 | 应用 reviewed diff | `agy(..., mode="execute", allow_write=True)`（自动 worktree） |
 | 数小时大重构 | `agy_start(..., mode="long")` 然后轮询 |
+| 诊断执行细节 / 轮询推理进度 | `agy_transcript(..., mode="progress"|"transcript")` |
 | 需要 Anthropic / OpenAI 对话状态 | 不调 —— `agy` 是独立模型独立上下文 |
 
 ## 安全底线

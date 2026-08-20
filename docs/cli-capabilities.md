@@ -69,6 +69,7 @@ safe `extra_env` entries.
 | `~/.gemini/antigravity-cli/log/cli-*.log` | klog operational log | Replaced per-invocation via `--log-file <tmp>`; tailed for lifecycle events. |
 | `~/.gemini/antigravity-cli/conversations/` | Conversation store (empty until use) | Not touched by wrapper. |
 | `~/.gemini/antigravity-cli/brain/<uuid>/*.pb`, `implicit/*.pb` | Encrypted protobuf state | Not touched. |
+| `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl` | Primary conversation transcript (compact step JSONL) | Read-only access by `agy_transcript` tool; parsed and redacted. |
 | `~/.gemini/antigravity-cli/log/**/transcript.jsonl` | NDJSON subagent transcript (when present) | Tailed opportunistically; treated as opaque pass-through events. |
 
 ## klog landmark lines parsed by the adapter

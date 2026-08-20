@@ -50,6 +50,7 @@ from agy_mcp.safety import SafetyPolicy
 from agy_mcp.utils import (
     augment_path_env_for_windows,
     is_windows,
+    open_transcript_no_follow,
     prepare_subprocess_command,
     scrub_env,
     truncate_middle,
@@ -1200,22 +1201,7 @@ def _drain_transcript(path: Path, ctx: _RunContext, adapter: AgyPrintBackend) ->
             pass
 
 
-def _open_transcript_no_follow(path: Path):
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            raise OSError(f"refusing to read non-regular transcript: {path}")
-        return os.fdopen(fd, "r", encoding="utf-8", errors="replace")
-    except BaseException:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        raise
+_open_transcript_no_follow = open_transcript_no_follow
 
 
 # ---------------------------------------------------------------------------

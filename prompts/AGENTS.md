@@ -21,8 +21,8 @@ registered, this project ships an MCP bridge to Google Antigravity
   `agy_read` / `agy_cancel`).
 
 Available MCP tools: `agy`, `agy_start`, `agy_continue`, `agy_status`,
-`agy_read`, `agy_cancel`, `agy_sessions`, `agy_doctor`,
-`agy_install_skill`, `agy_purge`.
+`agy_read`, `agy_result`, `agy_transcript`, `agy_cancel`, `agy_sessions`,
+`agy_doctor`, `agy_install_skill`, `agy_purge`.
 
 ### Tool routing
 
@@ -33,7 +33,8 @@ Available MCP tools: `agy`, `agy_start`, `agy_continue`, `agy_status`,
 | Second opinion on a bug | `agy(PROMPT="…", mode="review", output_protocol="codex")` |
 | Generate a diff for review | `agy(PROMPT="…", mode="prototype")` (no `--allow-write`) |
 | Apply a reviewed diff | `agy(PROMPT="…", mode="execute", allow_write=True)` (auto worktree) |
-| Multi-hour refactor | `agy_start(..., mode="long")` then poll with `agy_status` / `agy_read` |
+| Multi-hour refactor | `agy_start(..., mode="long")` then poll with `agy_status` / `agy_transcript` |
+| Inspect reasoning / diagnostics | `agy_transcript(..., mode="progress"|"transcript")` |
 
 ### Output protocol
 

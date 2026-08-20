@@ -106,7 +106,9 @@ Notes:
 
 - **SQLite tail (Strategy B).** `~/.gemini/antigravity-cli/conversations/`
   is empty on disk; the per-conversation `brain/<uuid>/*.pb` files are
-  protobuf and appear to be keyring-encrypted. Dead end.
+  protobuf and appear to be keyring-encrypted. Note: the adjacent plaintext
+  `brain/<uuid>/.system_generated/logs/transcript.jsonl` **is** parsed by
+  the `agy_transcript` tool.
 - **gRPC sidecar interception.** `agy` spawns a Language Server on a
   random high port (TLS-wrapped, unpublished proto). Experimental; flagged
   for a future "Lab" mode.
@@ -228,6 +230,17 @@ For `execute` and `long` modes, the adapter enforces completion semantics:
 - It exposes final and log-derived events (lifecycle events from klog, assistant messages, result events).
 - It does **not** provide live intermediate model reasoning or tool-event streaming.
 - Subagents written to transcript logs are watched opportunistically, but token streaming is not available from `agy --print`.
+
+## Brain-directory transcript reader (`agy_transcript`)
+
+`agy_transcript` reads directly from the Antigravity CLI's brain directory:
+`~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`.
+
+- **Contrast with `agy_read`**: While `agy_read` yields the supervisor's lifecycle event log, `agy_transcript` accesses the agent's internal thought process (thinking blocks, user requests with XML tags stripped, tool invocations with arguments, and per-step timing).
+- **Two operating modes**:
+  - `mode="progress"`: A lightweight summary (`TranscriptProgress` envelope: step counts, tool breakdown, thinking cycles, prompt count, last activity, elapsed seconds) designed for low-token polling during active background runs.
+  - `mode="transcript"`: A bounded, redacted sequence of `TranscriptStep` objects for post-mortem diagnostics.
+- **Safety guarantees**: The reader rejects symlinks with `O_NOFOLLOW` / `S_ISREG`, refuses files over 50 MB, clamps read bytes to `max_bytes` (default 200 KB, ceiling 5 MB), and sanitizes all content through `SafetyPolicy.redact()`.
 
 ## Per-call truncation
 

@@ -84,14 +84,20 @@ When using MCP tools, `agy_continue` resumes the conversation only; the
 caller supplies the working directory (`cd`) for each turn. Empty
 continuation output is treated as a failure.
 
-## Long jobs (start / status / result / read / cancel)
+## Long jobs (start / status / result / read / transcript / cancel)
 
 For tasks that exceed a single Claude turn, use the supervisor surface
 via the MCP tools `agy_start` / `agy_status` / `agy_result` /
-`agy_read` / `agy_cancel`.
+`agy_read` / `agy_transcript` / `agy_cancel`.
 Note that `agy_read` exposes final and log-derived events; it does not
 provide live intermediate model reasoning or tool-event streaming.
+To inspect internal reasoning or poll live progress, use `agy_transcript`.
 See `references/usage.md` for full examples.
+
+### Inspecting Antigravity Agent Reasoning (`agy_transcript`)
+
+- **Live progress polling**: `agy_transcript(job_id=..., mode="progress")` returns step count, tool invocation breakdown, thinking cycles, and last activity.
+- **Post-mortem reasoning replay**: `agy_transcript(job_id=..., mode="transcript")` returns the full bounded, redacted sequence of reasoning steps, prompts, and tool calls.
 
 ## Capability detection
 
