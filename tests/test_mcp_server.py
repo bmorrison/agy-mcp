@@ -170,10 +170,10 @@ def _wait_until(predicate, *, timeout: float = 3.0) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def test_eleven_tools_registered():
+def test_twelve_tools_registered():
     """The documented agy tool set must all live on the FastMCP instance.
 
-    The metadata surface currently includes ``agy_result`` as the eleventh tool.
+    The metadata surface currently includes ``agy_transcript`` as the twelfth tool.
     """
 
     expected = {
@@ -188,6 +188,7 @@ def test_eleven_tools_registered():
         "agy_doctor",
         "agy_install_skill",
         "agy_purge",
+        "agy_transcript",
     }
     assert expected == set(server.mcp._tool_manager._tools.keys())
 

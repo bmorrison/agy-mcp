@@ -82,8 +82,9 @@ useful.
 ## When the driving agent is in `long` mode
 
 - You are running detached. The driving agent polls the bridge's
-  supervisor, fetches final output with `agy_result`, and reads events
-  out of `agy_read` (which exposes final and log-derived events).
+  supervisor, fetches final output with `agy_result`, reads events
+  out of `agy_read` (which exposes final and log-derived events), or
+  monitors live step progress and reasoning through `agy_transcript`.
 - Emit a one-line progress note every N significant steps so the
   supervisor surfaces something useful.
 - If you hit an unrecoverable error, emit a single-sentence error

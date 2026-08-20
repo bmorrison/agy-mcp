@@ -786,6 +786,28 @@ def _relative_parts_under_verified_root(
 # ---------------------------------------------------------------------------
 
 
+def open_transcript_no_follow(path: Path):
+    """Open a transcript file with O_NOFOLLOW and verify it is a regular file.
+
+    Raises OSError if the target is a symlink, FIFO, directory, or socket.
+    """
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(f"refusing to read non-regular transcript: {path}")
+        return os.fdopen(fd, "r", encoding="utf-8", errors="replace")
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+
+
 def configure_utf8_stdio() -> None:
     """Force UTF-8 on stdio (avoid mojibake on Windows / non-UTF-8 locales)."""
 
@@ -807,6 +829,7 @@ __all__ = [
     "ensure_directory",
     "expand_user_path",
     "is_windows",
+    "open_transcript_no_follow",
     "prepare_subprocess_command",
     "redact_command",
     "redact_text",

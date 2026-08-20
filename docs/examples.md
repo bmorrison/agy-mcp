@@ -1,6 +1,6 @@
 # Examples
 
-Seven end-to-end scenarios showing the typical bridge call patterns. All
+Eight end-to-end scenarios showing the typical bridge call patterns. All
 examples assume `agy-mcp` is registered with the caller (see
 [`installation.md`](installation.md)).
 
@@ -59,28 +59,23 @@ and leaves it for you to inspect / merge.
 
 ## 3. Long-running refactor (detached)
 
-The change will take 30+ minutes. You don't want to block the caller.
+You have a multi-hour task (e.g. migrate 50 handlers) you want to run
+in the background while you continue working.
 
 ```python
+# Launch the detached worker; returns immediately with a job_id.
 start = agy_start(
-    PROMPT="""
-Rewrite the legacy auth middleware in src/middleware/auth.py to use
-the new TokenStore abstraction. There are ~40 call sites; update them
-all and keep tests green. Don't merge until tests pass.
-""",
-    cd="/Users/me/work/api",
+    PROMPT="Migrate all handlers to sqlx; write tests; verify make test passes.",
+    cd="/Users/me/work/widgetsvc",
     mode="long",
-    # `allow_write=True` is required for execute-mode mutation. Bridge
-    # default `worktree=True` means the run lands under
-    # `.agy-mcp/worktrees/<session_id>/` rather than the live checkout —
-    # that's the safety net. Override with config or
-    # `AGY_MCP_WORKTREE_DEFAULT=0` if you intentionally want writes in
-    # the main tree.
     allow_write=True,
 )
 job_id = start["job_id"]
-print("kicked off", job_id)
 
+# Poll status when you want a check-in. agy_status returns:
+#   {"success": True, "record": {... JobRecord fields incl. artifacts ...}}
+status = agy_status(job_id)
+record = status["record"]
 # ... do other work, handle other turns ...
 
 # Poll status when you want a check-in. agy_status returns:
@@ -101,9 +96,9 @@ If the job hangs you can `agy_cancel(job_id)` — the supervisor sends
 `SIGTERM` to the process group, waits a grace window, then `SIGKILL`s
 the leftover.
 
-For `agy_status`, `agy_read`, `agy_result`, and `agy_cancel`, the `job_id`
-argument may be the full id or a unique prefix such as `job_177986`. If the
-prefix matches more than one stored job, the tool returns a structured
+For `agy_status`, `agy_read`, `agy_result`, `agy_transcript`, and `agy_cancel`,
+the `job_id` argument may be the full id or a unique prefix such as `job_177986`.
+If the prefix matches more than one stored job, the tool returns a structured
 `success=false` ambiguity error rather than guessing.
 
 ---
@@ -235,6 +230,37 @@ agy_purge(days=4000)     # also refuses (cap is 10 years)
 The tool only touches directories whose name parses as a valid
 `job_id` slug; arbitrary files under `~/.agy-mcp/sessions/` are
 left alone.
+
+---
+
+## 8. Inspecting agent reasoning and progress transcript
+
+Inspect what an active background job is doing (live progress) or what a
+finished run did (post-mortem transcript).
+
+```python
+# Polling live progress during a detached job:
+prog = agy_transcript(job_id=job_id, mode="progress")
+if prog["success"] and prog["progress"]:
+    p = prog["progress"]
+    print(f"Step {p['total_steps']} | Tools: {p['tool_breakdown']} | Thinking cycles: {p['thinking_cycle_count']}")
+    print(f"Last activity: {p['last_activity_at']} ({p['elapsed_seconds']}s elapsed)")
+
+# Post-mortem full reasoning chain after a run completes:
+full = agy_transcript(job_id=job_id, mode="transcript")
+if full["success"] and full["transcript"]:
+    for step in full["transcript"]:
+        print(f"[{step['step_index']}] {step['source']} / {step['type']}:")
+        if step["thinking"]:
+            print(f"  Thinking: {step['thinking'][:120]}...")
+        if step["tool_calls"]:
+            for tc in step["tool_calls"]:
+                print(f"  Tool: {tc['name']}({tc['args']})")
+```
+
+You can pass `job_id` (full ID or unique prefix) or directly pass the
+Antigravity conversation UUID via `conversation_id`. All text content
+is automatically sanitized through `SafetyPolicy.redact`.
 
 ---
 
