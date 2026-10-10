@@ -169,7 +169,7 @@ class GeminiCliBackend(BaseAdapter):
             sink=event_sink,
             transcript_seen=set(),
         )
-        self._emit(ctx, _gemini_init_event(request=request, cap=cap))
+        self._emit(ctx, _gemini_init_event(request=request, cap=cap, argv=argv))
 
         env = self._build_subprocess_env(request)
         augment_path_env_for_windows(env)
@@ -517,7 +517,10 @@ def _first_field(payload: dict, candidates: tuple[str, ...]):
     return None
 
 
-def _gemini_init_event(*, request: BridgeRequest, cap: Capability) -> CanonicalEvent:
+def _gemini_init_event(
+    *, request: BridgeRequest, cap: Capability, argv: list[str] | None = None,
+) -> CanonicalEvent:
+    forwarded = request.model is not None and argv is not None and argv.count(f"--model={request.model}") == 1
     return CanonicalEvent(
         type="system",
         subtype="init",
@@ -527,6 +530,8 @@ def _gemini_init_event(*, request: BridgeRequest, cap: Capability) -> CanonicalE
             "bin_path": cap.bin_path,
             "version": cap.version,
             "model": request.model or cap.model,
+            "forwarded_model": request.model if forwarded else None,
+            "forwarded_model_source": "constructed_argv" if forwarded else None,
             "cwd": request.cwd,
             "mode": request.mode,
             "sandbox": request.sandbox,

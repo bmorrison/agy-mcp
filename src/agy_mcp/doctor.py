@@ -63,6 +63,15 @@ class DoctorReport:
             "platform": self.platform,
             "python_version": self.python_version,
             "checks": [c.to_dict() for c in self.checks],
+            "quota": {
+                "backend": "agy",
+                "availability": "unknown",
+                "remaining_quota": None,
+                "reset_at": None,
+                "retry_after_seconds": None,
+                "source": "not_probed",
+                "note": "Health verifies installation/auth, not inference quota. Inspect adapter.quota or JobRecord.extra.quota for observed exhaustion errors.",
+            },
         }
 
 

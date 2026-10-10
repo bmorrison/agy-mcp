@@ -150,7 +150,7 @@ collaboration backend any MCP client can call. Two equivalent paths:
 | Diff for review | `agy(..., mode="prototype")` (no `allow_write`) |
 | Apply a reviewed diff | `agy(..., mode="execute", allow_write=True)` (auto worktree) |
 | Multi-hour refactor | `agy_start(..., mode="long")` then poll |
-| Diagnose execution details / poll reasoning progress | `agy_transcript(..., mode="progress"|"transcript")` |
+| Diagnose execution / sample observable progress | `agy_transcript(..., mode="progress"|"transcript")` |
 | Anything needing the Anthropic / OpenAI conversation state | Don't delegate — `agy` is a separate model with its own context |
 
 ## Safety floor
@@ -191,7 +191,8 @@ that repo knows when to call `agy`:
 | [`README_JA.md`](README_JA.md) | Japanese README |
 | [`security.md`](security.md) | Threat model, defence catalogue, explicit non-defences |
 | [`cli-capabilities.md`](cli-capabilities.md) | Live `agy --help` + capability matrix |
-| [`examples.md`](examples.md) | 7 end-to-end scenarios |
+| [`subagent-workflows.md`](subagent-workflows.md) | Reliable parent workflow: model evidence, sample completeness, lifecycle, quota and acceptance |
+| [`examples.md`](examples.md) | 8 end-to-end scenarios |
 | [`comparison-with-cli-wrappers.md`](comparison-with-cli-wrappers.md) | Stream-json passthrough vs Hybrid backend wrapper patterns |
 | [`release.md`](release.md) | PyPI trusted publishing + GitHub Release manual (one-time setup + routine flow) |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | Version history (Keep a Changelog) |

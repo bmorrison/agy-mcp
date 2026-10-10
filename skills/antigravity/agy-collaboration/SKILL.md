@@ -84,7 +84,7 @@ useful.
 - You are running detached. The driving agent polls the bridge's
   supervisor, fetches final output with `agy_result`, reads events
   out of `agy_read` (which exposes final and log-derived events), or
-  monitors live step progress and reasoning through `agy_transcript`.
+  monitors sample-scoped observable progress through `agy_transcript`.
 - Emit a one-line progress note every N significant steps so the
   supervisor surfaces something useful.
 - If you hit an unrecoverable error, emit a single-sentence error
@@ -95,6 +95,17 @@ useful.
   `AGY_MCP_STATUS: COMPLETE`
   or
   `AGY_MCP_STATUS: INCOMPLETE <reason>`
+
+## Honest completion evidence
+
+Report changed paths, commands actually run, executed assertions, exits, durable
+artifacts, and explicit gaps. A status footer certifies your claimed execution
+state only, not parent acceptance or validation. Do not infer effective serving
+identity from CLI selectors or claim quota balances/reset times without verified
+evidence. No retry/model/backend switch after exhaustion without parent approval.
+A worktree is checkout isolation, not unrestricted permission: terminal/editor
+capabilities may differ. On denial stop/report; do not redirect HOME/GIT_CONFIG
+or weaken permissions. Preserve failed-run evidence; do not invent a partial audit.
 
 ## Multi-turn within a session
 

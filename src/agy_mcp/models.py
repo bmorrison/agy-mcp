@@ -317,6 +317,9 @@ class AdapterMetadata(BaseModel):
     bin_path: str | None = None
     version: str | None = None
     model: str | None = None
+    # Legacy model is a requested/default label, not serving attestation.
+    model_selection: dict[str, Any] = Field(default_factory=dict)
+    quota: dict[str, Any] | None = None
     output_protocol: OutputProtocol | None = None
     supports_streaming: bool = False
     supports_tool_events: bool = False
@@ -575,6 +578,7 @@ class TranscriptToolResponse(_DictLikeEnvelope):
     job_id: str | None = None
     transcript: list[dict[str, Any]] | None = None
     progress: dict[str, Any] | None = None
+    sample: dict[str, Any] = Field(default_factory=dict)
     step_count: int = 0
 
 

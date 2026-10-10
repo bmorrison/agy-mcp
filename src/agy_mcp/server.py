@@ -65,7 +65,7 @@ from agy_mcp.safety import SafetyPolicy
 from agy_mcp.session_store import SessionStore
 from agy_mcp.supervisor import Supervisor
 from agy_mcp.transcript import (
-    read_transcript,
+    read_transcript_sample,
     resolve_transcript_path,
     summarize_progress,
 )
@@ -1197,6 +1197,24 @@ def agy_transcript_tool(
                 transcript=None,
                 progress=None,
                 step_count=0,
+                sample={
+                    "availability": "unbound",
+                    "scope": "prefix",
+                    "counts_scope": "sample",
+                    "last_activity_at_scope": "sample",
+                    "elapsed_seconds_scope": "sample",
+                    "max_bytes": max_bytes,
+                    "bytes_read": 0,
+                    "byte_start": 0,
+                    "byte_end": 0,
+                    "file_size_before": None,
+                    "file_size_after": None,
+                    "complete": False,
+                    "truncated": False,
+                    "size_changed": False,
+                    "malformed_line_count": 0,
+                    "partial_line_bytes": 0,
+                },
             )
         return _wrapper_failure(
             safety,
@@ -1218,7 +1236,7 @@ def agy_transcript_tool(
         )
 
     try:
-        steps = read_transcript(
+        result = read_transcript_sample(
             transcript_path,
             max_bytes=max_bytes,
             redact_fn=safety.redact,
@@ -1233,6 +1251,8 @@ def agy_transcript_tool(
             job_id=resolved_job_id or job_id,
         )
 
+    steps = result.steps
+    sample = result.sample.to_dict()
     if not steps:
         return TranscriptToolResponse(
             success=True,
@@ -1242,6 +1262,7 @@ def agy_transcript_tool(
             transcript=None,
             progress=None,
             step_count=0,
+            sample=sample,
         )
 
     if mode == "progress":
@@ -1253,6 +1274,7 @@ def agy_transcript_tool(
             job_id=resolved_job_id or job_id,
             progress=prog.to_dict(),
             step_count=len(steps),
+            sample=sample,
         )
 
     return TranscriptToolResponse(
@@ -1262,6 +1284,7 @@ def agy_transcript_tool(
         job_id=resolved_job_id or job_id,
         transcript=[s.to_dict() for s in steps],
         step_count=len(steps),
+        sample=sample,
     )
 
 

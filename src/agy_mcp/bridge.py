@@ -37,12 +37,14 @@ from agy_mcp.adapters import (
     ProtocolTranslator,
 )
 from agy_mcp.config import Config, get_config
+from agy_mcp.diagnostics import project_quota_diagnostic
 from agy_mcp.models import (
     AdapterMetadata,
     BridgeRequest,
     BridgeResponse,
     CanonicalEvent,
 )
+from agy_mcp.provenance import model_selection
 from agy_mcp.routing import build_adapter
 from agy_mcp.routing import select_backend as _routing_select_backend
 from agy_mcp.safety import SafetyPolicy, is_git_workspace
@@ -496,7 +498,7 @@ def _run_unsafe(
             error=run_error or "adapter raised an unknown error",
             warnings=all_warnings,
             cwd=_response_cwd(safety, effective_cwd),
-            adapter=_adapter_meta(adapter, request, safety),
+            adapter=_adapter_meta(adapter, request, safety, events=sink.events),
         ).touch()
 
     translator = ProtocolTranslator(
@@ -556,7 +558,7 @@ def _run_unsafe(
         error=error_field,
         warnings=all_warnings,
         cwd=_response_cwd(safety, effective_cwd),
-        adapter=_adapter_meta(adapter, request, safety),
+        adapter=_adapter_meta(adapter, request, safety, events=result.events),
         command_preview=None,
         log_path=None,  # ephemeral spool dir is gone by now
     ).touch()
@@ -585,7 +587,7 @@ def _dry_run_response(
         SESSION_ID=request.session_id or "",
         status="completed",
         cwd=_response_cwd(safety, cwd),
-        adapter=_adapter_meta(adapter, request, safety),
+        adapter=_adapter_meta(adapter, request, safety, argv=argv),
         command_preview=preview,
         warnings=warnings,
     ).touch()
@@ -604,13 +606,22 @@ def _adapter_meta(
     adapter: BaseAdapter,
     request: BridgeRequest,
     safety: SafetyPolicy,
+    *,
+    events: list[CanonicalEvent] | None = None,
+    argv: list[str] | None = None,
 ) -> AdapterMetadata:
     cap = adapter.detect()
+    observed_events = events or []
     return AdapterMetadata(
         backend=cap.backend,
         bin_path=safety.redact(cap.bin_path) if cap.bin_path else None,
         version=cap.version,
-        model=request.model or cap.model,
+        model=safety.redact(request.model or cap.model) if (request.model or cap.model) else None,
+        model_selection=model_selection(request, cap, safety, events=observed_events, argv=argv),
+        quota=project_quota_diagnostic(
+            observed_events, requested_backend=request.backend,
+            requested_model=request.model, safety=safety,
+        ),
         output_protocol=request.output_protocol,
         supports_streaming=cap.supports_streaming,
         supports_tool_events=cap.supports_tool_events,

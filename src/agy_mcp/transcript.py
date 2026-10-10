@@ -128,20 +128,62 @@ def _redact_args(args: Any, redact_fn: Callable[[str], str]) -> Any:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class TranscriptSample:
+    """Half-open raw prefix range; counts/activity describe sampled records only."""
+
+    max_bytes: int
+    availability: str = "missing"
+    scope: str = "prefix"
+    counts_scope: str = "sample"
+    last_activity_at_scope: str = "sample"
+    elapsed_seconds_scope: str = "sample"
+    byte_start: int = 0
+    byte_end: int = 0
+    bytes_read: int = 0
+    file_size_before: int | None = None
+    file_size_after: int | None = None
+    size_changed: bool = False
+    truncated: bool = False
+    complete: bool = False
+    malformed_line_count: int = 0
+    partial_line_bytes: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class TranscriptReadResult:
+    steps: list[TranscriptStep]
+    sample: TranscriptSample
+
+
 def read_transcript(
     transcript_path: Path,
     max_bytes: int = 200_000,
     *,
     redact_fn: Callable[[str], str] | None = None,
 ) -> list[TranscriptStep]:
-    """Read and parse the transcript JSONL, returning bounded steps.
+    """Compatibility wrapper returning only parsed prefix steps."""
+    return read_transcript_sample(transcript_path, max_bytes, redact_fn=redact_fn).steps
 
-    - Rejects symlinks (security: no following into arbitrary paths).
-    - Rejects files > 50 MB.
-    - Caps read at ``max_bytes``.
-    - Applies ``redact_fn`` to ``content``, ``thinking``, and tool argument strings.
-    - Skips malformed lines gracefully.
+
+def read_transcript_sample(
+    transcript_path: Path,
+    max_bytes: int = 200_000,
+    *,
+    redact_fn: Callable[[str], str] | None = None,
+) -> TranscriptReadResult:
+    """Read at most max_bytes raw bytes; parse newline-complete UTF-8 JSONL.
+
+    Descriptor sizes bracket the read. No tail scan or completeness flag
+    establishes current whole-session activity. Missing files are unavailable,
+    not complete empty transcripts. Files over 50 MB are refused.
     """
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+        raise ValueError("max_bytes must be a positive integer")
+    sample = TranscriptSample(max_bytes=max_bytes)
 
     def _identity(text: str) -> str:
         return text
@@ -151,7 +193,7 @@ def read_transcript(
     try:
         st = os.lstat(transcript_path)
     except FileNotFoundError:
-        return []
+        return TranscriptReadResult([], sample)
     except OSError as exc:
         raise OSError(f"failed to inspect transcript path: {exc}") from exc
 
@@ -164,31 +206,55 @@ def read_transcript(
             f"transcript file exceeds {_MAX_TRANSCRIPT_BYTES} bytes ({st.st_size} bytes); refusing to read"
         )
 
-    fp = open_transcript_no_follow(transcript_path)
+    try:
+        fp = open_transcript_no_follow(transcript_path)
+    except FileNotFoundError:
+        return TranscriptReadResult([], sample)
     steps: list[TranscriptStep] = []
-    total_bytes_read = 0
-    had_malformed_line = False
 
     try:
-        for line in fp:
-            line_bytes = len(line.encode("utf-8", errors="replace"))
-            total_bytes_read += line_bytes
-            if total_bytes_read > max_bytes and steps:
+        before = os.fstat(fp.fileno()).st_size
+        if before > _MAX_TRANSCRIPT_BYTES:
+            raise ValueError(
+                f"transcript file exceeds {_MAX_TRANSCRIPT_BYTES} bytes; refusing to read"
+            )
+        sample.availability = "available"
+        sample.file_size_before = before
+        # Bypass text buffering/decoding: even invalid or oversized first lines
+        # cannot trigger a read past the raw byte budget.
+        chunks: list[bytes] = []
+        remaining = min(max_bytes, before)
+        while remaining:
+            chunk = os.read(fp.fileno(), min(remaining, 64 * 1024))
+            if not chunk:
                 break
-
-            stripped = line.strip()
-            if not stripped:
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        after = os.fstat(fp.fileno()).st_size
+        if after > _MAX_TRANSCRIPT_BYTES:
+            raise ValueError(
+                f"transcript file exceeds {_MAX_TRANSCRIPT_BYTES} bytes; refusing to read"
+            )
+        sample.file_size_after = after
+        sample.size_changed = before != after
+        sample.bytes_read = sample.byte_end = len(data)
+        sample.truncated = len(data) < max(before, after)
+        lines = data.split(b"\n")
+        sample.partial_line_bytes = len(lines.pop())
+        for line in lines:
+            if not line.strip():
                 continue
-
             try:
-                payload = json.loads(stripped)
-            except json.JSONDecodeError:
-                if not had_malformed_line:
+                payload = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                sample.malformed_line_count += 1
+                if sample.malformed_line_count == 1:
                     _LOG.warning("skipping malformed transcript line in %s", transcript_path)
-                    had_malformed_line = True
                 continue
 
             if not isinstance(payload, dict):
+                sample.malformed_line_count += 1
                 continue
 
             step_idx = payload.get("step_index")
@@ -241,7 +307,13 @@ def read_transcript(
     finally:
         fp.close()
 
-    return steps
+    sample.complete = (
+        not sample.truncated
+        and not sample.size_changed
+        and not sample.malformed_line_count
+        and not sample.partial_line_bytes
+    )
+    return TranscriptReadResult(steps, sample)
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +335,7 @@ def summarize_progress(
     conversation_id: str,
     steps: list[TranscriptStep],
 ) -> TranscriptProgress:
-    """Compute a lightweight progress summary from parsed steps."""
+    """Compute sample-scoped counts/activity, not whole-session freshness."""
     total_steps = len(steps)
     tool_call_count = 0
     tool_breakdown: dict[str, int] = {}
@@ -322,6 +394,9 @@ __all__ = [
     "AGY_BRAIN_DIR",
     "TranscriptProgress",
     "TranscriptStep",
+    "TranscriptSample",
+    "TranscriptReadResult",
+    "read_transcript_sample",
     "read_transcript",
     "resolve_transcript_path",
     "summarize_progress",
