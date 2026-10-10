@@ -1442,3 +1442,19 @@ def test_bridge_run_complete_footer_succeeds(monkeypatch, tmp_path: Path):
     assert resp.status == "completed"
     assert resp.error is None
     assert resp.agent_messages == "Work complete."
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_dry_run_agy_model_command_boundary(supported, monkeypatch, tmp_path):
+    from agy_mcp.adapters.agy import AgyPrintBackend
+
+    backend = AgyPrintBackend()
+    cap = _capability("agy").model_copy(update={"supports_model": supported})
+    monkeypatch.setattr(backend, "detect", lambda: cap)
+    request = BridgeRequest(prompt="hello", model="gemini-3-pro", debug=True, dry_run=True)
+    resp = _dry_run_response(request, backend, tmp_path, _safety(), [])
+    assert resp.success is supported
+    if supported:
+        assert (resp.command_preview or []).count("--model=gemini-3-pro") == 1
+    else:
+        assert "does not advertise --model" in (resp.error or "")

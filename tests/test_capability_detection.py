@@ -13,6 +13,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from agy_mcp.adapters.agy import (
     AGY_AUTH_LOG_LOOKBACK_S,
     AgyPrintBackend,
@@ -451,3 +453,24 @@ def test_agy_probe_handles_legacy_help_without_new_project_or_mode(tmp_path, mon
     assert cap.supports_mode is False
     assert any("--new-project` not detected" in w for w in cap.warnings)
     assert any("--mode` not detected" in w for w in cap.warnings)
+
+
+@pytest.mark.parametrize(
+    ("help_text", "expected"),
+    [
+        ("  --model string  Model to use", True),
+        ("  -m, --model=<name>  Model to use", True),
+        ("  --model-name string  Model label", False),
+        ("Use --model to select a model in newer versions.", False),
+        ("  --print  Use --model in newer versions", False),
+        ("", False),
+    ],
+)
+def test_agy_probe_model_option(help_text, expected, monkeypatch):
+    backend = AgyPrintBackend()
+    monkeypatch.setattr(backend, "locate_binary", lambda name: "/fake/agy")
+    monkeypatch.setattr(backend, "_run_probe", lambda *a, **kw: help_text)
+    monkeypatch.setattr(backend, "_discover_model", lambda: None)
+    monkeypatch.setattr("agy_mcp.adapters.agy.detect_agy_auth_source", lambda: None)
+    monkeypatch.setattr("agy_mcp.adapters.agy.detect_agy_account_issue", lambda: None)
+    assert backend.detect().supports_model is expected

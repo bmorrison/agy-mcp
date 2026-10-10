@@ -54,6 +54,7 @@ from agy_mcp.adapters import (
     ProtocolTranslator,
 )
 from agy_mcp.config import Config, get_config
+from agy_mcp.diagnostics import project_quota_diagnostic
 from agy_mcp.models import (
     AdapterMetadata,
     BridgeRequest,
@@ -62,6 +63,7 @@ from agy_mcp.models import (
     JobRecord,
     JobStatus,
 )
+from agy_mcp.provenance import model_selection
 from agy_mcp.routing import select_backend as _routing_select_backend
 from agy_mcp.safety import SafetyPolicy, is_git_workspace
 from agy_mcp.session_store import (
@@ -94,9 +96,30 @@ class StoreEventSink(EventSink):
         self.job_id = job_id
         self._lock = threading.Lock()
         self._last_event_ts: str | None = None
+        self._diagnostic_events: list[CanonicalEvent] = []
+
+    @property
+    def diagnostic_events(self) -> list[CanonicalEvent]:
+        with self._lock:
+            return list(self._diagnostic_events)
+
+    @property
+    def last_event_at(self) -> str | None:
+        with self._lock:
+            return self._last_event_ts
 
     def emit(self, event: CanonicalEvent) -> None:
         with self._lock:
+            # Keep only model/quota signals, not assistant bodies or reasoning.
+            # The adapter may raise instead of returning its event collection.
+            if (
+                event.type == "system" and event.subtype in ("init", "print_starting")
+                or event.type == "error" and event.subtype in (
+                    "upstream_resource_exhausted", "upstream_agent_executor_error",
+                )
+            ):
+                self._diagnostic_events.append(event)
+            self._last_event_ts = event.ts
             try:
                 self.store.append_event(self.job_id, event)
             except OSError:
@@ -109,7 +132,6 @@ class StoreEventSink(EventSink):
                 # store via the job dir on disk; programmatic visibility
                 # is tracked as a Phase 4+ followup.
                 return
-            self._last_event_ts = event.ts
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +380,16 @@ class Supervisor:
                 # Jobs execute in worker threads owned by this supervisor
                 # process, so pid intentionally identifies the owner process.
                 pid=os.getpid(),
-                extra={"supervisor": owner},
+                extra={
+                    "supervisor": owner,
+                    "model_selection": model_selection(effective_request, cap, self.safety),
+                    "lifecycle": _lifecycle_diagnostics(
+                        resolved_job_id,
+                        "running",
+                        cancel_requested=None,
+                        adapter_returned=None,
+                    ),
+                },
             )
         except (FileExistsError, TypeError, ValueError) as exc:
             self._job_slots.release()  # release the slot we just took
@@ -418,7 +449,13 @@ class Supervisor:
                     rec.error = self.safety.redact(
                         f"failed to start worker thread: {exc}",
                     )
-                    rec.touch()
+                    rec.finished_at = _utc_now()
+                    rec.extra["lifecycle"] = _lifecycle_diagnostics(
+                        rec.job_id,
+                        "worker_start_failed",
+                        cancel_requested=False,
+                        adapter_returned=False,
+                    )
                     self.store.update_job(rec)
             except Exception:  # noqa: BLE001 - best-effort
                 pass
@@ -442,7 +479,8 @@ class Supervisor:
                 backend=backend_name,
                 bin_path=self.safety.redact(cap.bin_path) if cap.bin_path else None,
                 version=cap.version,
-                model=effective_request.model or cap.model,
+                model=self.safety.redact(effective_request.model or cap.model) if (effective_request.model or cap.model) else None,
+                model_selection=model_selection(effective_request, cap, self.safety),
                 output_protocol=effective_request.output_protocol,
                 supports_streaming=cap.supports_streaming,
                 supports_tool_events=cap.supports_tool_events,
@@ -483,12 +521,18 @@ class Supervisor:
                 return self._public_record(fresh)
             if _owned_by_foreign_live_supervisor(fresh, self._instance_id):
                 return self._public_record(fresh)
-            finalised = self.store.finalize_job(
+            fresh.status = "failed"
+            fresh.exit_code = None
+            fresh.error = self.safety.redact(_RECONCILE_ERROR)
+            fresh.finished_at = _utc_now()
+            fresh.extra["lifecycle"] = _lifecycle_diagnostics(
                 job_id,
-                status="failed",
-                error=self.safety.redact(_RECONCILE_ERROR),
+                "worker_lost",
+                cancel_requested=None,
+                adapter_returned=None,
             )
-            return self._public_record(finalised or fresh)
+            finalised = self.store.update_job(fresh)
+            return self._public_record(finalised)
 
     def read_events(self, job_id: str, *, since: int = 0) -> list[CanonicalEvent]:
         """Return canonical events from offset ``since`` onwards."""
@@ -613,6 +657,8 @@ class Supervisor:
                     cancel_event=cancel_event,
                     request=request,
                     route_warnings=route_warnings,
+                    exception_events=sink.diagnostic_events,
+                    last_observed_at=sink.last_event_at,
                 )
             finally:
                 with self._lock:
@@ -634,6 +680,8 @@ class Supervisor:
         cancel_event: threading.Event,
         request: BridgeRequest,
         route_warnings: list[str],
+        exception_events: list[CanonicalEvent] | None = None,
+        last_observed_at: str | None = None,
     ) -> None:
         status: JobStatus
         exit_code: int | None = None
@@ -678,6 +726,26 @@ class Supervisor:
                 if not error:
                     error = _pick_error_from_events(result.events) or "non-zero exit"
 
+        # Diagnose only observed adapter signals; preserve the status precedence
+        # above, including clean completion winning over a late cancel.
+        if status == "completed":
+            termination_reason = "completed"
+        elif status == "cancelled":
+            termination_reason = "cancelled"
+        elif result is not None and result.had_incomplete_error:
+            termination_reason = "incomplete_response"
+        elif result is not None and result.had_upstream_error:
+            termination_reason = "upstream_error"
+        elif result is not None and any(
+            event.type in ("error", "result") and event.subtype == "wrapper_timeout"
+            for event in result.events
+        ):
+            termination_reason = "wrapper_timeout"
+        elif run_error is not None or result is None:
+            termination_reason = "adapter_error"
+        else:
+            termination_reason = "nonzero_exit"
+
         # Atomic single-write finalize: mutate the record in memory and
         # call ``update_job`` exactly once so a reader cannot observe a
         # ``status=completed`` record without its artifacts / route
@@ -708,6 +776,25 @@ class Supervisor:
                 pass
             return
         record.status = status
+        observed_events = result.events if result is not None else (exception_events or [])
+        configured_model = record.extra.get("model_selection", {}).get("configured")
+        selection = model_selection(request, None, self.safety, events=observed_events)
+        selection["configured"] = configured_model
+        record.extra["model_selection"] = selection
+        if result is not None and observed_events:
+            record.last_event_at = observed_events[-1].ts
+        elif last_observed_at is not None:
+            record.last_event_at = last_observed_at
+        record.extra["quota"] = project_quota_diagnostic(
+            observed_events, requested_backend=request.backend,
+            requested_model=request.model, safety=self.safety,
+        )
+        record.extra["lifecycle"] = _lifecycle_diagnostics(
+            job_id,
+            termination_reason,
+            cancel_requested=was_cancelled,
+            adapter_returned=result is not None,
+        )
         record.exit_code = exit_code
         record.finished_at = _utc_now()
         if session_id_resolved and not record.session_id:
@@ -724,6 +811,38 @@ class Supervisor:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _lifecycle_diagnostics(
+    job_id: str,
+    termination_reason: str,
+    *,
+    cancel_requested: bool | None,
+    adapter_returned: bool | None,
+) -> dict[str, object]:
+    """Describe observed lifecycle, not validation or parent acceptance.
+
+    cancel_requested is the flag observed at finalization, not cancellation
+    history. None means unknown. Evidence references name store-owned locations;
+    availability and completeness are unknown, including after worker loss.
+    """
+
+    return {
+        "termination_reason": termination_reason,
+        "cancel_requested": cancel_requested,
+        "adapter_returned": adapter_returned,
+        "validation": "not_reported",
+        "parent_acceptance": "not_recorded",
+        "evidence": {
+            name: f"<session:{job_id}/{filename}>"
+            for name, filename in (
+                ("events", "events.jsonl"),
+                ("stdout", "stdout.log"),
+                ("stderr", "stderr.log"),
+                ("log", "agy.log"),
+            )
+        },
+    }
 
 
 def _utc_now() -> str:

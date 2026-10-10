@@ -1175,3 +1175,55 @@ def test_run_empty_output_fails_structured(tmp_path, monkeypatch, isolated_agy):
     assert result.had_incomplete_error is True
     assert result.incomplete_error_text == "incomplete_response: empty output"
     assert result.events[-1].subtype == "incomplete_response"
+
+
+@pytest.mark.parametrize("session_id", [None, "conv-existing-123"])
+@pytest.mark.parametrize(
+    "model", ["gemini-3-pro", "--dangerously-skip-permissions", "--model=other --sandbox"]
+)
+def test_build_command_forwards_model_fused_once(session_id, model, monkeypatch):
+    backend = AgyPrintBackend()
+    cap = _fake_cap("/fake/agy")
+    cap = cap.model_copy(update={
+        "supports_model": True,
+        "supports_new_project": True,
+        "supports_conversation": True,
+        "supports_mode": True,
+        "supports_sandbox": True,
+        "supports_print_timeout": True,
+    })
+    monkeypatch.setattr(backend, "detect", lambda: cap)
+    req = BridgeRequest(
+        prompt="hello", model=model, session_id=session_id, sandbox=True, timeout=120
+    )
+    argv = backend.build_command(req, log_path=None)
+    assert [arg for arg in argv if arg.startswith("--model=")] == [f"--model={model}"]
+    assert "--model" not in argv
+    assert "--dangerously-skip-permissions" not in argv
+    assert "--sandbox" in argv
+    assert argv[argv.index("--mode") + 1] == "plan"
+    assert argv[argv.index("--print-timeout") + 1] == "90s"
+    assert ("--new-project" in argv) is (session_id is None)
+    if session_id:
+        assert f"--conversation={session_id}" in argv
+
+
+@pytest.mark.parametrize("supports_model", [False, True])
+def test_build_command_omitted_model_keeps_default(supports_model, monkeypatch):
+    backend = AgyPrintBackend()
+    cap = _fake_cap("/fake/agy").model_copy(update={"supports_model": supports_model})
+    monkeypatch.setattr(backend, "detect", lambda: cap)
+    argv = backend.build_command(BridgeRequest(prompt="hello"), log_path=None)
+    assert not any(arg.startswith("--model") for arg in argv)
+
+
+def test_run_explicit_model_unsupported_fails_before_spawn(tmp_path, monkeypatch):
+    backend = AgyPrintBackend()
+    monkeypatch.setattr(backend, "detect", lambda: _fake_cap("/fake/agy"))
+    spawned = []
+    monkeypatch.setattr(
+        "agy_mcp.adapters.agy.subprocess.Popen", lambda *a, **kw: spawned.append(a)
+    )
+    with pytest.raises(RuntimeError, match="does not advertise --model"):
+        backend.run(BridgeRequest(prompt="hello", cwd=str(tmp_path), model="gemini-3-pro"))
+    assert spawned == []

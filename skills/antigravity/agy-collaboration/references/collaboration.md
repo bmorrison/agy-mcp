@@ -85,8 +85,10 @@ A bad long-mode progress note:
 Working on it...
 ```
 
-The supervisor turns the line into a `subagent_event` the driving
-agent reads. Make it actionable.
+The bridge buffers ordinary stdout; a prose note does not guarantee a live
+supervisor event. Make handoffs actionable through explicit artifacts, tool
+results and final output. Sampled transcript progress is bounded and may be
+incomplete; do not promise a heartbeat from this note.
 
 ## When the bridge crashes (you'll know because the next turn opens with `success=false`)
 

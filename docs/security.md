@@ -81,15 +81,17 @@ being parsed as a new flag. The fused form is what we pass to
   (Windows) so cancellation can `killpg(SIGTERM)` / send
   `CTRL_BREAK_EVENT` without losing the whole tree.
 - `stdin=DEVNULL` — `agy` is never given interactive input.
-- Environment is **filtered**, not inherited: start from
-  `os.environ.copy()`, drop any key matching `SECRET_ENV_NAME_PATTERN`
+- Environment starts from `os.environ.copy()`; values are scrubbed, not
+  universally removed. Keys matching `SECRET_ENV_NAME_PATTERN`
   (regex covering `*TOKEN`, `*API_KEY`, `*SECRET`, `*PASSWORD`,
   `*CRED*`, etc.) PLUS the explicit `DEFAULT_SCRUB_ENV_NAMES` list
   (`AWS_*`, `GCP_*`, `AZURE_*`, `OPENAI_*`, `ANTHROPIC_*`,
   `GH_TOKEN`, `GITHUB_TOKEN`, `NPM_TOKEN`, `PYPI_TOKEN`, etc. — 32
   entries). The regex and the list run in tandem so an env name like
   `MY_CUSTOM_API_KEY` (regex match) and `AWS_PROFILE` (explicit list
-  match) both get dropped.
+  match) both get masked values. Ordinary HOME/GIT_CONFIG controls remain
+  inherited; caller-controlled bridge/CLI runtime overrides are separately
+  rejected.
 
 ### 5. File-write primitive (`utils.py::safe_write_text`)
 
@@ -113,6 +115,11 @@ detect-after-the-fact for a successful parent swap; the POSIX openat
 path is the airtight path.
 
 ### 6. Worktree isolation (`worktree.py`)
+
+A worktree isolates checkout edits, not arbitrary filesystem access. Read-only
+modes are instructions, not OS write enforcement. Upstream terminal/editor
+permissions may differ; report a denial without weakening permissions or
+redirecting HOME/GIT_CONFIG. See [parent workflows](subagent-workflows.md).
 
 When `mode=execute` and `allow_write=True`, the bridge:
 

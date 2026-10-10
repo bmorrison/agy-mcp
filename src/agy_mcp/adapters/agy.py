@@ -367,6 +367,13 @@ class AgyPrintBackend(BaseAdapter):
         )
         cap.supports_new_project = has_flag(text, "--new-project")
         cap.supports_mode = has_flag(text, "--mode")
+        # Require an option declaration, not prose mentioning --model or a
+        # longer flag such as --model-name. Allow comma-separated aliases.
+        cap.supports_model = bool(re.search(
+            r"^\s*(?:-{1,2}[A-Za-z][\w-]*\s*,\s*)*--model(?=[\s=]|$)",
+            text,
+            re.MULTILINE,
+        ))
         # agy v1.0.0 has no JSON / stream-json output today; surface explicitly.
         cap.supports_streaming = False
         cap.supports_tool_events = False
@@ -451,6 +458,11 @@ class AgyPrintBackend(BaseAdapter):
             raise RuntimeError(
                 "Installed `agy` does not advertise --print; check `agy --help`."
             )
+        if request.model is not None and not cap.supports_model:
+            raise RuntimeError(
+                "Installed `agy` does not advertise --model; cannot honor the "
+                "requested model. Check `agy --help` or omit model to use the CLI default."
+            )
         # H1 (Phase 3 review): use ``--print=<prompt>`` rather than
         # ``--print <prompt>`` so a hostile prompt starting with ``--`` (e.g.
         # ``--dangerously-skip-permissions``) cannot peel off into a fresh
@@ -461,6 +473,10 @@ class AgyPrintBackend(BaseAdapter):
             cap.bin_path,
             f"--print={self._prepare_prompt(request)}",
         ]
+
+        if request.model is not None:
+            # Fuse caller-supplied values so flag-like model names remain data.
+            argv.append(f"--model={request.model}")
 
         if cap.supports_print_timeout:
             # Reserve wrapper-side grace for klog drain + child cleanup.
@@ -559,7 +575,7 @@ class AgyPrintBackend(BaseAdapter):
             transcript_seen=set(),
         )
 
-        self._emit(ctx, _system_init_event(request=request, cap=cap))
+        self._emit(ctx, _system_init_event(request=request, cap=cap, argv=argv))
 
         env = self._build_subprocess_env(request)
         augment_path_env_for_windows(env)
@@ -1209,7 +1225,10 @@ _open_transcript_no_follow = open_transcript_no_follow
 # ---------------------------------------------------------------------------
 
 
-def _system_init_event(*, request: BridgeRequest, cap: Capability) -> CanonicalEvent:
+def _system_init_event(
+    *, request: BridgeRequest, cap: Capability, argv: list[str] | None = None,
+) -> CanonicalEvent:
+    forwarded = request.model is not None and argv is not None and argv.count(f"--model={request.model}") == 1
     return CanonicalEvent(
         type="system",
         subtype="init",
@@ -1219,6 +1238,8 @@ def _system_init_event(*, request: BridgeRequest, cap: Capability) -> CanonicalE
             "bin_path": cap.bin_path,
             "version": cap.version,
             "model": cap.model,
+            "forwarded_model": request.model if forwarded else None,
+            "forwarded_model_source": "constructed_argv" if forwarded else None,
             "cwd": request.cwd,
             "mode": request.mode,
             "sandbox": request.sandbox,

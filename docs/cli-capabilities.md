@@ -40,6 +40,31 @@ Detection rule: probe `agy --help`; if `--new-project` or `--mode` are present, 
 adapter sets `supports_new_project` and `supports_mode` to True. If absent on older builds,
 the adapter omits the flags and records clear warnings.
 
+## Model selection on newer builds
+
+The local `agy 1.3.2 --help` now advertises `--model`; the v1.0.0 table
+above remains an older compatibility baseline. The adapter probes an actual
+`--model` option declaration and exposes `supports_model` (default false),
+not a hardcoded version threshold or an incidental mention in help prose.
+
+When supported, an explicit request model is forwarded exactly once as
+`--model=<value>` in a single argv element, including on resumed conversations.
+Omitting the model leaves CLI default selection unchanged. On older builds
+without the option, an explicit model request fails before inference rather
+than silently using the default. No settings files are modified.
+
+The response's adapter `model` metadata reflects the requested model (or a
+settings-derived label when omitted), **not proof of actual runtime selection**.
+A debug dry-run command preview demonstrates forwarding only; live CLI logs
+(e.g. `Print mode: starting ... model=...` and the selected backend label) are
+needed to verify actual selection.
+
+Local verification on 2026-10-09 with CLI 1.3.2: an MCP `agy_start` request
+for `gemini-3.1-pro-low` logged that exact print-mode model and propagated
+`Gemini 3.1 Pro (Low)` to the backend. The read-only task completed with exit
+0. This verifies forwarding and execution for that invocation, not the
+correctness of the model's task output or other model identifiers.
+
 ## Environment variables read by `agy`
 
 Verified by string-mining the Mach-O binary:

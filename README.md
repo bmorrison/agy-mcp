@@ -173,7 +173,8 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 | [`docs/README_JA.md`](docs/README_JA.md) | 日本語 README |
 | [`docs/security.md`](docs/security.md) | 威胁模型、防护清单、明确不防御项 |
 | [`docs/cli-capabilities.md`](docs/cli-capabilities.md) | `agy --help` 实测 + capability 矩阵 |
-| [`docs/examples.md`](docs/examples.md) | 7 个典型场景 |
+| [`docs/subagent-workflows.md`](docs/subagent-workflows.md) | Reliable parent workflow: model evidence, sample completeness, lifecycle, quota and acceptance |
+| [`docs/examples.md`](docs/examples.md) | 8 个典型场景 |
 | [`docs/comparison-with-cli-wrappers.md`](docs/comparison-with-cli-wrappers.md) | Stream-json passthrough vs Hybrid backend 两种 wrapper 模式对比 |
 | [`docs/release.md`](docs/release.md) | PyPI trusted publishing + GitHub Release 发布手册（一次性设置 + 常规流程） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |

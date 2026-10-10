@@ -114,6 +114,7 @@ include = [
     "docs/README_ZH-TW.md",
     "docs/release.md",
     "docs/security.md",
+    "docs/subagent-workflows.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

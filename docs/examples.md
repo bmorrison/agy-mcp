@@ -233,7 +233,7 @@ left alone.
 
 ---
 
-## 8. Inspecting agent reasoning and progress transcript
+## 8. Inspecting sample-scoped progress and tool history
 
 Inspect what an active background job is doing (live progress) or what a
 finished run did (post-mortem transcript).
@@ -243,16 +243,15 @@ finished run did (post-mortem transcript).
 prog = agy_transcript(job_id=job_id, mode="progress")
 if prog["success"] and prog["progress"]:
     p = prog["progress"]
-    print(f"Step {p['total_steps']} | Tools: {p['tool_breakdown']} | Thinking cycles: {p['thinking_cycle_count']}")
+    sample = prog["sample"]  # check availability/completeness first
+    print(f"Sample steps {p['total_steps']} | Tools: {p['tool_breakdown']}")
     print(f"Last activity: {p['last_activity_at']} ({p['elapsed_seconds']}s elapsed)")
 
-# Post-mortem full reasoning chain after a run completes:
+# Bounded post-mortem observable tool history (not acceptance by reasoning):
 full = agy_transcript(job_id=job_id, mode="transcript")
 if full["success"] and full["transcript"]:
     for step in full["transcript"]:
         print(f"[{step['step_index']}] {step['source']} / {step['type']}:")
-        if step["thinking"]:
-            print(f"  Thinking: {step['thinking'][:120]}...")
         if step["tool_calls"]:
             for tc in step["tool_calls"]:
                 print(f"  Tool: {tc['name']}({tc['args']})")
@@ -263,6 +262,10 @@ Antigravity conversation UUID via `conversation_id`. All text content
 is automatically sanitized through `SafetyPolicy.redact`.
 
 ---
+
+Counts/timestamps describe the parsed prefix sample, not necessarily the whole
+session. See [reliable parent workflows](subagent-workflows.md) for incomplete
+samples, model evidence, lifecycle causes, quota unknowns and parent acceptance.
 
 ## Going further
 
