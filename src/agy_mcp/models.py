@@ -156,6 +156,7 @@ class Capability(BaseModel):
     supports_dangerously_skip_permissions: bool = False
     supports_new_project: bool = False
     supports_mode: bool = False
+    supports_model: bool = False
     supports_streaming: bool = False
     supports_tool_events: bool = False
     model: str | None = None
