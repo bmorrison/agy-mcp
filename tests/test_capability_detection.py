@@ -474,3 +474,42 @@ def test_agy_probe_model_option(help_text, expected, monkeypatch):
     monkeypatch.setattr("agy_mcp.adapters.agy.detect_agy_auth_source", lambda: None)
     monkeypatch.setattr("agy_mcp.adapters.agy.detect_agy_account_issue", lambda: None)
     assert backend.detect().supports_model is expected
+
+
+@pytest.mark.parametrize("inherited_update", [None, "0"])
+def test_agy_capability_probe_disables_updates_without_mutating_environment(monkeypatch, inherited_update):
+    from agy_mcp.adapters import agy
+
+    if inherited_update is None:
+        monkeypatch.delenv("AGY_CLI_DISABLE_AUTO_UPDATE", raising=False)
+    else:
+        monkeypatch.setenv("AGY_CLI_DISABLE_AUTO_UPDATE", inherited_update)
+    monkeypatch.setenv("OPENAI_API_KEY", "capability-secret-sentinel")
+    monkeypatch.setenv("NORMAL_SENTINEL", "preserved")
+    before = dict(os.environ)
+    received = []
+
+    def run(cmd, **kwargs):
+        received.append((cmd, kwargs["env"]))
+        return (0, "1.3.3", "")
+
+    monkeypatch.setattr(agy, "run_bounded_process", run)
+    for flag in ("--help", "--version"):
+        AgyPrintBackend._run_probe(["/synthetic/agy", flag], timeout=1)
+    assert len(received) == 2
+    for cmd, env in received:
+        assert cmd in (["/synthetic/agy", "--help"], ["/synthetic/agy", "--version"])
+        assert env["AGY_CLI_DISABLE_AUTO_UPDATE"] == "1"
+        assert env["OPENAI_API_KEY"] == "***"
+        assert env["NORMAL_SENTINEL"] == "preserved"
+    assert dict(os.environ) == before
+
+
+def test_bounded_probe_helper_imports_without_adapter_initialization_cycle():
+    import subprocess
+
+    completed = subprocess.run(
+        [sys.executable, "-c", "import agy_mcp.probe_process; import agy_mcp.adapters.agy; import agy_mcp.quota"],
+        capture_output=True, timeout=4, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

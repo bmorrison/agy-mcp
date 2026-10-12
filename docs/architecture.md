@@ -16,9 +16,10 @@ others.
                            |
 +--------------------------v-------------------------------------+
 |  MCP server  (src/agy_mcp/server.py)                           |
-|  - 12 tools: agy, agy_start, agy_continue, agy_status,         |
+|  - 13 tools: agy, agy_start, agy_continue, agy_status,         |
 |    agy_read, agy_result, agy_cancel, agy_sessions,             |
-|    agy_doctor, agy_install_skill, agy_purge, agy_transcript    |
+|    agy_doctor, agy_quota, agy_install_skill, agy_purge,        |
+|    agy_transcript                                            |
 |  - Singletons: config, safety, session_store, supervisor       |
 |  - Async tools wrap a per-loop CapacityLimiter (8 by default)  |
 +--------------------------+-------------------------------------+
@@ -58,6 +59,35 @@ others.
 ```
 
 ## Cross-cutting modules
+
+### `quota.py` — read-only subscription balances
+
+`agy_quota(force_refresh=False)` takes a dedicated MCP → `QuotaProbe` → CLI
+path, bypassing inference prompt preparation, the supervisor, and worktrees.
+It invokes the configured Antigravity binary with `--print=/quota
+--output-format json --print-timeout 20s` only on supported CLI versions
+(>= 1.1.11). The successful envelope must establish zero inference turns/tokens
+and no conversation; unrecognized versions or response formats fail visibly.
+
+`QuotaToolResponse` returns upstream shared groups and window buckets with
+`remaining_fraction`, UTC `reset_at`, `disabled`, and observation/cache metadata.
+Missing values remain null; disabled buckets have null remaining fractions.
+No model-name-based budgets, absolute request counts, billing estimates, or
+inference-availability guarantees are inferred. Strings are redacted and
+subprocess output/deadlines are bounded. A 30-second in-memory successful-result
+cache coalesces refreshes; a failed refresh never becomes a stale success.
+Account identity is not read: force refresh after switching accounts, since a
+switch without a detectable context change can remain cached for the TTL.
+The quota command and adapter help/version probe environments disable CLI
+auto-update without changing persistent settings. Programmatic callers supplying
+both an adapter and explicit safety policy must use compatible configurations;
+a mismatch fails before detection rather than mutating a shared adapter or
+ignoring stricter environment scrubbing. Cleanup is verified on POSIX
+for descendants remaining in the owned process group, not deliberately escaped
+sessions. Windows shutdown is best-effort without a Job Object/tree guarantee;
+no live Windows validation is claimed.
+Doctor health checks remain balance-independent, and error-derived inference
+quota diagnostics remain separate. No model/backend fallback is introduced.
 
 ### `safety.py` — SafetyPolicy
 
@@ -190,6 +220,7 @@ on canonical events so future agy event types survive without a schema bump).
 | `agy_cancel` | yes | Process-group cancel (POSIX `killpg` / Windows `CTRL_BREAK_EVENT`) |
 | `agy_sessions` | yes | List recent jobs with mtime / status / cwd summary |
 | `agy_doctor` | yes | Environment + auth probe (no secrets); `force_refresh=True` after CLI upgrade |
+| `agy_quota` | yes (async-wrapped) | Read-only shared subscription balances/reset times; `force_refresh=True` bypasses the 30-second successful-snapshot cache |
 | `agy_install_skill` | yes | Install SKILL bundle into Claude / Codex / Antigravity dirs |
 | `agy_purge` | yes | Prune session-store directories older than `days` (refuses `days<=0`) |
 
@@ -200,9 +231,9 @@ caps concurrent calls at 8.
 
 ## Failure routing
 
-Every non-trivial code path returns through `_structured_failure` →
-`BridgeResponse` so callers always get a `success=False` envelope rather
-than an exception. `_structured_failure` runs the error message through
+Inference failures return through `_structured_failure` → `BridgeResponse`;
+metadata tools use their own typed failure envelopes (`QuotaToolResponse` for
+`agy_quota`). Callers receive `success=False` rather than an exception. `_structured_failure` runs the error message through
 `SafetyPolicy.redact` so paths and tokens are anonymised before they
 land in the caller's transcript.
 

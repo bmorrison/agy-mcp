@@ -98,10 +98,23 @@ Evidence references do not certify complete artifacts. Cancellation is a
 request, not proof the process has exited. Supervise at bounded host-scheduled
 checkpoints rather than an unbounded busy polling loop.
 
-Doctor quota is unknown/not_probed. Remaining quota, reset and retry values
-are null. Error-derived `adapter.quota` / `record.extra.quota` classifies known
-resource-exhaustion events, not prompt/result/auth mentions; ambiguous shortages
-stay ambiguous. No automatic retry or backend/model substitution is added.
+`agy_quota(force_refresh=False)` returns read-only subscription snapshots via
+supported Antigravity CLI `/quota` JSON (>= 1.1.11), without an inference turn.
+Do not send `/quota` as an inference prompt. Inspect `success`/`status`, then
+`groups[].buckets[]` (`window`, `remaining_fraction`, UTC `reset_at`, `disabled`).
+Preserve upstream shared groups/windows: missing is unknown; disabled fractions
+are null, not usable balances. Fractions are not request counts or guaranteed
+availability. `observed_at`, `cached`, and `age_seconds` expose the 30-second
+in-memory successful-snapshot cache; force refresh bypasses it and coalesces
+active refreshes. Failure is explicit, never a stale successful snapshot. Force
+refresh after switching accounts: private account identity is not read, so
+undetectable switches can stay cached for TTL. No model/backend fallback.
+
+Doctor quota remains unknown/not_probed with null remaining/reset/retry fields;
+health does not run a balance probe. Error-derived `adapter.quota` /
+`record.extra.quota` is separate and classifies recognized resource-exhaustion
+events, not prompt/result/auth mentions; ambiguous shortages stay ambiguous.
+No automatic retry or backend/model substitution is added.
 
 Worktree isolation is not an OS sandbox; upstream terminal/editor permissions
 may differ. Report denials without changing HOME/GIT_CONFIG/permissions.

@@ -7,7 +7,7 @@
 
 语言：[`English`](docs/README_EN.md) · [`繁體中文`](docs/README_ZH-TW.md) · [`日本語`](docs/README_JA.md)
 
-> 把 Google **Antigravity CLI**（`agy`）包装成 12 个 typed MCP 工具，
+> 把 Google **Antigravity CLI**（`agy`）包装成 13 个 typed MCP 工具，
 > 任何 MCP 客户端（Claude Code / OpenAI Codex / Cursor / Cline /
 > Continue …）都能直接调用。配套可选 Skill bundle，让支持 skill 的
 > 平台学会*何时*调、*用哪个 mode*。
@@ -71,7 +71,7 @@ agy-doctor
 - 任何写入操作（包括上面这些）做之前先简短说一下要做什么，等我点头
   再执行；如果你的当前权限模式允许 acceptEdits，就直接执行。
 
-每完成一步给我一行汇报，全部完成后给出一份 4 行总结：装在哪、12 个
+每完成一步给我一行汇报，全部完成后给出一份 4 行总结：装在哪、13 个
 MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 ````
 
@@ -102,7 +102,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 把 Google 新发布的 Antigravity CLI（`agy`）包装成可被任意 MCP 客户端
 调用的协作 agent backend。两条等价路径：
 
-- **MCP server**：`agymcp` 经 FastMCP stdio 暴露 12 个 typed JSON 工具，
+- **MCP server**：`agymcp` 经 FastMCP stdio 暴露 13 个 typed JSON 工具，
   pydantic envelope 稳定可解析。**任何 MCP 客户端皆可**。
 - **Skill bundles**：装到 `~/.claude/skills/`、`~/.agents/skills/`、
   `~/.agy/skills/`，教 agent *何时*调 agy、*用哪个 mode*、注意哪些安全
@@ -114,7 +114,7 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 > `agy --print`，可能消耗 Antigravity 请求额度。本项目只包装、路由、
 > 隔离、审计，不重新实现 `agy` API。
 
-## 12 个 MCP 工具
+## 13 个 MCP 工具
 
 | 工具 | 用途 |
 |---|---|
@@ -128,8 +128,13 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 | `agy_cancel` | 跨平台 process group 终止；`job_id` 可用唯一前缀 |
 | `agy_sessions` | 列最近 session |
 | `agy_doctor` | 环境 + 鉴权 + capability 探测（不泄漏 secrets） |
+| `agy_quota` | 只读 Antigravity CLI `/quota` 元数据（无推理 turn）：返回上游共享模型组的周 / 五小时剩余比例与重置时间戳（停用或缺失值显式标出），30 秒内存缓存，`force_refresh=True` 强制刷新，无 model/backend fallback |
 | `agy_install_skill` | 把 SKILL bundle 装到 Claude / Codex / Antigravity 目录 |
 | `agy_purge` | 清理本机 session-store 目录（refuse `days<=0`） |
+
+> 查剩余额度用 `agy_quota`，不要用 `PROMPT='/quota'` 走推理 `agy`。
+> 需要 Antigravity CLI `>= 1.1.11`；它报告的是快照，不保证即时可用；
+> 被停用的 bucket 不是可用额度。
 
 ## 何时调用 / 何时不调用
 

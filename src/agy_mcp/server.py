@@ -11,6 +11,7 @@ Tools (all return dicts with stable keys; never raise across the wire):
 * ``agy_cancel`` — signal a running job to stop.
 * ``agy_sessions`` — list recent jobs.
 * ``agy_doctor`` — environment + capability probe.
+* ``agy_quota`` — read-only Antigravity quota snapshot (no inference).
 * ``agy_install_skill`` — write the scaffold skill into target dirs.
 
 Threading model: the FastMCP runtime drives tools from an asyncio loop and
@@ -55,12 +56,14 @@ from agy_mcp.models import (
     Mode,
     OutputProtocol,
     PurgeToolResponse,
+    QuotaToolResponse,
     ReadToolResponse,
     ResultToolResponse,
     SessionsToolResponse,
     StatusToolResponse,
     TranscriptToolResponse,
 )
+from agy_mcp.quota import QuotaProbe
 from agy_mcp.safety import SafetyPolicy
 from agy_mcp.session_store import SessionStore
 from agy_mcp.supervisor import Supervisor
@@ -86,6 +89,7 @@ _supervisor: Supervisor | None = None
 # Phase 5 R1 arch P1.5.
 _agy_adapter: AgyPrintBackend | None = None
 _gemini_adapter: GeminiCliBackend | None = None
+_quota_probe: QuotaProbe | None = None
 
 # Defence-in-depth cap so a malicious or buggy caller can't burn unbounded
 # memory by passing a multi-megabyte string in place of a job_id slug. We
@@ -166,14 +170,17 @@ def _ensure_adapters(*, force_refresh: bool = False) -> tuple[AgyPrintBackend, G
     the MCP server. (Phase 5 R2 security P2-1.)
     """
 
-    global _agy_adapter, _gemini_adapter
-    _, safety, _store_, _supervisor_ = _ensure_state()
+    global _agy_adapter, _gemini_adapter, _quota_probe
+    config, safety, _store_, _supervisor_ = _ensure_state()
     with _state_lock:
         if force_refresh:
+            if _quota_probe is not None:
+                _quota_probe.invalidate()
+            _quota_probe = None
             _agy_adapter = None
             _gemini_adapter = None
         if _agy_adapter is None:
-            _agy_adapter = AgyPrintBackend(safety=safety)
+            _agy_adapter = AgyPrintBackend(bin_override=config.backend.agy_bin, safety=safety)
         if _gemini_adapter is None:
             _gemini_adapter = GeminiCliBackend(safety=safety)
         return _agy_adapter, _gemini_adapter
@@ -212,7 +219,7 @@ def _reset_state_for_tests() -> None:
     module-level globals — keep it that way (Phase 5 R2 P3.7).
     """
 
-    global _config, _safety, _store, _supervisor, _agy_adapter, _gemini_adapter
+    global _config, _safety, _store, _supervisor, _agy_adapter, _gemini_adapter, _quota_probe
     with _state_lock:
         _config = None
         _safety = None
@@ -220,6 +227,7 @@ def _reset_state_for_tests() -> None:
         _supervisor = None
         _agy_adapter = None
         _gemini_adapter = None
+        _quota_probe = None
     with _bridge_limiter_lock:
         _bridge_limiters_by_loop.clear()
 
@@ -959,6 +967,54 @@ def agy_doctor_tool(force_refresh: bool = False) -> DoctorToolResponse:
 
 
 # ---------------------------------------------------------------------------
+# Tool: agy_quota — dedicated read-only metadata probe
+# ---------------------------------------------------------------------------
+
+
+def _get_quota_snapshot(force_refresh: bool) -> QuotaToolResponse:
+    """Initialize and probe entirely in a bounded worker, never the event loop."""
+    global _agy_adapter, _quota_probe
+    safety = _safety or SafetyPolicy()
+    try:
+        config, safety, _store_, _supervisor_ = _ensure_state()
+        with _state_lock:
+            if _agy_adapter is None:
+                _agy_adapter = AgyPrintBackend(
+                    bin_override=config.backend.agy_bin, safety=safety,
+                )
+            # Share doctor's actual adapter, not the inference routing factory.
+            if _quota_probe is None or _quota_probe.adapter is not _agy_adapter:
+                if _quota_probe is not None:
+                    _quota_probe.invalidate()
+                _quota_probe = QuotaProbe(adapter=_agy_adapter, safety=safety)
+            probe = _quota_probe
+        return probe.get(force_refresh=force_refresh)
+    except Exception as exc:  # noqa: BLE001 - includes initialization failures
+        return QuotaToolResponse(
+            success=False,
+            status="unavailable",
+            error=safety.redact(str(exc))[:2048],
+        )
+
+
+@mcp.tool(
+    name="agy_quota",
+    description=(
+        "Read Antigravity CLI /quota metadata without an inference turn. "
+        "Reports shared upstream quota groups and reset times, not guaranteed "
+        "availability. Successful snapshots are cached for 30 seconds; "
+        "force_refresh bypasses the cache and coalesces an active refresh. "
+        "No model or backend fallback."
+    ),
+)
+async def agy_quota_tool(force_refresh: bool = False) -> QuotaToolResponse:
+    limiter = await _get_bridge_limiter()
+    return await anyio.to_thread.run_sync(
+        _get_quota_snapshot, force_refresh, limiter=limiter,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tool: agy_install_skill — write scaffold skill into target dirs
 # ---------------------------------------------------------------------------
 
@@ -1308,6 +1364,7 @@ __all__ = [
     "agy_doctor_tool",
     "agy_install_skill_tool",
     "agy_purge_tool",
+    "agy_quota_tool",
     "agy_read_tool",
     "agy_result_tool",
     "agy_sessions_tool",

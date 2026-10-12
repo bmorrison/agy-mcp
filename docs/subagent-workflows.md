@@ -126,12 +126,38 @@ separate worker completion from checks and parent approval. Request an honest
 handoff with changed paths, commands, executed assertions, exits, evidence, and
 gaps; independently verify it before integration.
 
-## Quota visibility without an invented balance
+## Quota snapshots and error diagnostics are separate
 
-`agy_doctor()["report"]["quota"]` reports `availability="unknown"` and null
-remaining/reset/retry values with `source="not_probed"`. A healthy installation/auth check does
-not establish available inference quota. No balance probe is currently
-implemented; this does not claim all upstream APIs lack quota information.
+Use `agy_quota(force_refresh=False)` to query the configured Antigravity CLI's
+read-only `/quota` JSON metadata (CLI >= 1.1.11). Do not send `PROMPT="/quota"`
+through `agy`: its inference preamble prevents headless command dispatch.
+The dedicated tool validates zero turns/tokens and no conversation; it does
+not start an inference job or silently fall back to another backend/model.
+
+On success, inspect `groups[].buckets[]`: `remaining_fraction` is a raw fraction
+in [0, 1], `reset_at` is a UTC timestamp, and `window`/group labels come from
+upstream. Missing fraction/reset fields are null. `disabled=true` means that
+bucket does not currently apply, even if upstream carried a positive fraction;
+the normalized fraction is null. Preserve both weekly and five-hour windows.
+Observed Gemini Flash/Pro share one group and Claude/GPT share another; do not
+invent separate balances for each family or turn fractions into request counts.
+A snapshot is not a guarantee of successful inference or a billing meter.
+
+Successful snapshots are cached in memory for 30 seconds, with `observed_at`,
+`cached`, and `age_seconds`. `force_refresh=True` bypasses a cached snapshot and
+coalesces an already-running refresh. Failed refreshes return explicit failure,
+not stale success. Auth context is fingerprinted without reading private account
+contents; account switches without a detectable context change can remain cached
+for the TTL. Force refresh after switching accounts. Unknown/unsupported formats,
+auth failures, timeouts, and unavailable binaries are explicit statuses.
+The quota command and CLI detection probes disable auto-update only in their
+subprocess environments. Cleanup is validated for POSIX owned-group descendants,
+not escaped sessions; Windows tree cleanup has no Job Object guarantee and is
+not live-validated here.
+
+`agy_doctor()["report"]["quota"]` still reports `availability="unknown"` and null
+remaining/reset/retry fields with `source="not_probed"`. Health checks installation
+and auth evidence, not subscription balances, and do not call the balance tool.
 
 For recognized exhaustion error events, synchronous `adapter.quota` and
 background `record.extra.quota` provide a redacted diagnostic:
@@ -158,5 +184,6 @@ to load installed source changes; package files on disk do not update imported
 modules. Reinstall user-scope skills only with permission: repository bundles
 and packaged copies are synchronized, but existing user installations may be
 stale. No runtime configuration or skill installation is performed by these
-source changes. Numeric quota introspection, cursor/tail progress, native host
-wakeups/steering, and richer partial audits remain future work.
+source changes. `agy_quota` requires a fresh server process that loads the new
+tool; existing deployments are not silently restarted or reinstalled. Cursor/tail
+progress, native host wakeups/steering, and richer partial audits remain future work.

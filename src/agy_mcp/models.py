@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Enums (string literals — kept as Literal for trivial JSON round-trips)
@@ -582,6 +583,85 @@ class TranscriptToolResponse(_DictLikeEnvelope):
     step_count: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Quota visibility models (model-family quota visibility protocol seam)
+# ---------------------------------------------------------------------------
+
+QuotaStatus = Literal[
+    "ok",
+    "unsupported",
+    "unavailable",
+    "auth_error",
+    "timeout",
+    "invalid_response",
+]
+
+
+class QuotaBucket(BaseModel):
+    """Normalized quota bucket within a quota group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    window: str
+    disabled: bool = False
+    remaining_fraction: float | None = None
+    reset_at: str | None = None
+    description: str | None = None
+
+    @field_validator("remaining_fraction", mode="before")
+    @classmethod
+    def _validate_remaining_fraction(cls, v: Any) -> float | None:
+        if v is None:
+            return None
+        if type(v) is bool:
+            raise ValueError("remaining_fraction must be a number, not bool")
+        if not isinstance(v, (int, float)):
+            raise ValueError(f"remaining_fraction must be numeric, got {type(v).__name__}")
+        f_val = float(v)
+        if not math.isfinite(f_val):
+            raise ValueError(f"remaining_fraction must be finite, got: {f_val}")
+        if f_val < 0.0 or f_val > 1.0:
+            raise ValueError(f"remaining_fraction must be between 0.0 and 1.0, got: {f_val}")
+        return f_val
+
+    @model_validator(mode="after")
+    def _validate_disabled_and_reset(self) -> QuotaBucket:
+        if self.disabled:
+            if self.reset_at is not None:
+                raise ValueError("disabled bucket cannot have reset_at timestamp")
+            self.remaining_fraction = None
+        return self
+
+
+class QuotaGroup(BaseModel):
+    """Group of models sharing a quota pool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    buckets: list[QuotaBucket] = Field(default_factory=list)
+
+
+class QuotaToolResponse(_DictLikeEnvelope):
+    """Envelope returned by ``agy_quota``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    status: QuotaStatus = "ok"
+    error: str | None = None
+    backend: Literal["agy"] = "agy"
+    cli_version: str | None = None
+    source: str = "agy:/quota"
+    observed_at: str | None = None
+    cached: bool = False
+    age_seconds: float = 0.0
+    groups: list[QuotaGroup] = Field(default_factory=list)
+
+
 __all__ = [
     "AdapterMetadata",
     "BackendName",
@@ -597,6 +677,10 @@ __all__ = [
     "Mode",
     "OutputProtocol",
     "PurgeToolResponse",
+    "QuotaBucket",
+    "QuotaGroup",
+    "QuotaStatus",
+    "QuotaToolResponse",
     "ReadToolResponse",
     "ResultToolResponse",
     "SessionsToolResponse",

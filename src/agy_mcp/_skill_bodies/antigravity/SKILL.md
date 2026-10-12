@@ -102,7 +102,11 @@ Report changed paths, commands actually run, executed assertions, exits, durable
 artifacts, and explicit gaps. A status footer certifies your claimed execution
 state only, not parent acceptance or validation. Do not infer effective serving
 identity from CLI selectors or claim quota balances/reset times without verified
-evidence. No retry/model/backend switch after exhaustion without parent approval.
+evidence. A parent can use the read-only `agy_quota` MCP tool (CLI >= 1.1.11)
+for upstream shared-group/window snapshots, not an inference `/quota` prompt.
+Missing values are unknown, disabled buckets are not usable balances, and cached
+snapshots (30-second TTL) do not guarantee inference availability. No retry/model/
+backend switch after exhaustion without parent approval.
 A worktree is checkout isolation, not unrestricted permission: terminal/editor
 capabilities may differ. On denial stop/report; do not redirect HOME/GIT_CONFIG
 or weaken permissions. Preserve failed-run evidence; do not invent a partial audit.
