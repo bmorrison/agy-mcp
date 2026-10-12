@@ -442,6 +442,8 @@ class AgyPrintBackend(BaseAdapter):
         if code is None or code < 0:
             reason = "timed out" if code == -1 and err == "timeout" else "could not complete"
             raise _CapabilityProbeError(f"capability process {reason}")
+        if code != 0:
+            raise _CapabilityProbeError(f"capability process exited with code {code}")
         return out + ("\n" + err if err else "")
 
     @staticmethod

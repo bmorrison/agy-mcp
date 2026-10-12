@@ -216,3 +216,26 @@ def test_auth_discovery_rekeys_result_for_coalesced_waiter(tmp_path, monkeypatch
     assert probe.get().cached
     calls = [json.loads(line)["argv"] for line in log.read_text().splitlines()]
     assert sum("--print=/quota" in call for call in calls) == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="synthetic executable")
+@pytest.mark.parametrize("flag", ["--help", "--version"])
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("exit_code", [1, 2, 127])
+def test_nonzero_detection_cannot_authorize_quota(tmp_path, monkeypatch, flag, stream, exit_code):
+    recognizable_output = "Antigravity version: 1.3.3\nUsage: --print --print-timeout"
+    special = (
+        f"if {flag!r} in a:\n"
+        f"    sys.{stream}.write({recognizable_output!r})\n"
+        f"    raise SystemExit({exit_code})"
+    )
+    probe, log = make_synthetic_detection_probe(tmp_path, monkeypatch, special=special)
+    result = probe.get()
+    assert not result.success and result.status == "unsupported"
+    assert probe._cached_response is None
+    cap = probe.adapter.detect()
+    assert cap.version is None
+    assert cap.supports_print is (flag == "--version")
+    assert any(f"exited with code {exit_code}" in warning for warning in cap.warnings)
+    calls = [json.loads(line)["argv"] for line in log.read_text().splitlines()]
+    assert not any("--print=/quota" in call for call in calls)

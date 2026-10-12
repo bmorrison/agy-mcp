@@ -173,6 +173,15 @@ Progress evidence:
   and strengthened the explicit waiter-timeout test. **308 focused/frozen passed
   in 16.87s; 917 full tests passed in 36.75s**; lint, whitespace and fresh-source
   offline stdio smoke passed. Earlier live receipts/lab cutoff remain unchanged.
+- Codex review round 3 reviewed `9fa9c5e` and raised one further P2: nonzero
+  help/version exits could still authorize quota when output looked valid.
+  Parent reproduced all **12 cases**: help/version, stdout/stderr, and exit codes
+  1/2/127. Detection now rejects every nonzero exit without trusting its output;
+  successful help capabilities remain available if only version detection fails.
+  **320 focused/frozen checks passed in 18.65s; 929 full tests passed in 37.26s**;
+  lint, whitespace and fresh offline stdio smoke passed. This repair proceeds to
+  another current-head Codex review under the operator's until-green instruction.
+  No additional live query, deployment change, merge or original-receipt rewrite.
 
 ## Goal
 
