@@ -75,9 +75,14 @@ Missing values remain null; disabled buckets have null remaining fractions.
 No model-name-based budgets, absolute request counts, billing estimates, or
 inference-availability guarantees are inferred. Strings are redacted and
 subprocess output/deadlines are bounded. A 30-second in-memory successful-result
-cache coalesces refreshes; a failed refresh never becomes a stale success.
-Account identity is not read: force refresh after switching accounts, since a
-switch without a detectable context change can remain cached for the TTL.
+cache coalesces the whole refresh, including forced help/version detection;
+a failed refresh never becomes a stale success. Valid help capabilities remain
+usable for ordinary inference if version capture fails, but quota stays gated
+on a verified version. Auth evidence uses source kind/path, not mutable log or
+credential-file mtimes: CLI log rotation and token refresh are not account
+identity changes. Account identity is not read: force refresh after switching
+accounts, since a switch without a detectable context change can remain cached
+for the TTL.
 The quota command and adapter help/version probe environments disable CLI
 auto-update without changing persistent settings. Programmatic callers supplying
 both an adapter and explicit safety policy must use compatible configurations;

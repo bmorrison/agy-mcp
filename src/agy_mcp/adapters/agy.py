@@ -361,16 +361,10 @@ class AgyPrintBackend(BaseAdapter):
             help_text = self._run_probe(
                 [bin_path, "--help"], timeout=AGY_HELP_TIMEOUT_S, safety=self.safety
             )
-            version_text = self._run_probe(
-                [bin_path], extra=["--version"], timeout=AGY_VERSION_TIMEOUT_S, safety=self.safety
-            )
         except _CapabilityProbeError as exc:
-            # Do not parse a valid counterpart after overflow/timeout/capture
-            # failure: either command's failure leaves version unverified.
             cap.warnings.append(f"capability probe failed: {exc}")
             return cap
         cap.raw_help = help_text or None
-        cap.version = _parse_version(version_text) or _parse_version_from_help(help_text)
 
         text = help_text or ""
         cap.supports_print = has_flag(text, "--print", "-p", "--prompt")
@@ -395,6 +389,17 @@ class AgyPrintBackend(BaseAdapter):
         # agy v1.0.0 has no JSON / stream-json output today; surface explicitly.
         cap.supports_streaming = False
         cap.supports_tool_events = False
+
+        try:
+            version_text = self._run_probe(
+                [bin_path], extra=["--version"], timeout=AGY_VERSION_TIMEOUT_S, safety=self.safety
+            )
+        except _CapabilityProbeError as exc:
+            # Valid help still authorizes ordinary print capabilities. A failed
+            # version capture must not fall back to help to authorize quota.
+            cap.warnings.append(f"capability probe failed: {exc}")
+        else:
+            cap.version = _parse_version(version_text) or _parse_version_from_help(help_text)
 
         if not cap.authenticated:
             cap.warnings.append(

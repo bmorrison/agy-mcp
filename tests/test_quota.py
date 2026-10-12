@@ -1849,7 +1849,10 @@ def test_detection_stream_overflow_never_authorizes_quota(tmp_path, monkeypatch,
     calls = [json.loads(line)["argv"] for line in log.read_text().splitlines()]
     assert not any("--print=/quota" in call for call in calls)
     cap = probe.adapter.detect()
-    assert cap.version is None and not cap.supports_print
+    assert cap.version is None
+    # Help capture failure authorizes nothing. Version capture failure must
+    # block quota, but retain valid help capabilities for ordinary inference.
+    assert cap.supports_print is (flag == "--version")
     assert any("exceeds maximum size" in warning for warning in cap.warnings)
 
 

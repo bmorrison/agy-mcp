@@ -101,7 +101,6 @@ _SLASH_DISABLE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"slash[\s_-]?commands?\s+(?:are\s+)?disabled", re.IGNORECASE),
     re.compile(r"slash[\s_-]?commands?\s+(?:are\s+)?not\s+permitted", re.IGNORECASE),
     re.compile(r"slash[\s_-]?commands?\s+(?:are\s+)?not\s+allowed", re.IGNORECASE),
-    re.compile(r"disabled\s+by\s+(?:operator|admin|policy)", re.IGNORECASE),
 )
 
 
@@ -466,6 +465,7 @@ class _InFlight:
     def __init__(self) -> None:
         self.done = threading.Event()
         self.response: QuotaToolResponse | None = None
+        self.key: _CacheKey | None = None
 
 
 class QuotaProbe:
@@ -509,7 +509,7 @@ class QuotaProbe:
         self._cached_response: QuotaToolResponse | None = None
         self._cached_mono: float = 0.0
         self._cached_key: _CacheKey | None = None
-        self._in_flight_map: dict[_CacheKey, _InFlight] = {}
+        self._in_flight_map: dict[_CacheKey | None, _InFlight] = {}
 
     def invalidate(self) -> None:
         """Explicitly clear the in-memory cache."""
@@ -574,18 +574,16 @@ class QuotaProbe:
             self._detect_lock.release()
 
     def _detect_auth_context(self) -> str:
-        """Safe auth-context fingerprint without inspecting private credentials."""
+        """Auth evidence, not account identity; metadata can change during probes."""
         try:
             source = detect_agy_auth_source()
             if source is None:
                 return "none"
-            mtime = 0.0
-            try:
-                if source.path.exists():
-                    mtime = source.path.stat().st_mtime
-            except OSError:
-                pass
-            return f"{source.kind}:{source.path}:{mtime}"
+            # Log rotation and OAuth refresh are effects of the CLI itself, not
+            # account switches. Never use their mutable mtimes as cache identity.
+            # Stable source kind/path and evidence disappearance remain signals;
+            # undetectable account switches require TTL expiry or force refresh.
+            return f"{source.kind}:{source.path}"
         except Exception:
             return "unknown"
 
@@ -605,72 +603,92 @@ class QuotaProbe:
             return self._failure("unsupported", "quota requires the Antigravity adapter")
         wait_started: float | None = None
         while True:
-            try:
-                current_key = self._get_cache_key(refresh=force_refresh)
-            except Exception as exc:
-                self.invalidate()
-                return self._failure("unavailable", f"failed to determine cache key: {exc}")
-            if current_key[3]:
-                self.invalidate()
-                return self._failure(
-                    "unsupported", "slash commands disabled by operator policy", current_key
-                )
-
             with self._lock:
                 generation = self._generation
-                # Even normal callers join an active refresh rather than see a
-                # stale success while that refresh may be failing.
-                active = next(iter(self._in_flight_map.items()), None)
-                if active is None:
-                    if (
-                        not force_refresh
-                        and self._cached_response is not None
-                        and self._cached_key == current_key
-                    ):
-                        age = time.monotonic() - self._cached_mono
-                        if age < CACHE_TTL_SECONDS:
-                            return copy.deepcopy(self._cached_response).model_copy(
-                                update={"cached": True, "age_seconds": max(0.0, round(age, 3))}
-                            )
+                flight = next(iter(self._in_flight_map.values()), None)
+                if flight is None:
+                    # Reserve the entire refresh, including capability detection.
+                    # Other callers must join before running forced help/version.
                     flight = _InFlight()
-                    self._in_flight_map[current_key] = flight
-                    break
-                flight_key, flight = active
+                    self._in_flight_map[None] = flight
+                    leader = True
+                else:
+                    leader = False
+            if leader:
+                return self._refresh(flight, generation, force_refresh)
 
             if wait_started is None:
                 wait_started = time.monotonic()
             remaining = QUOTA_PROCESS_DEADLINE_S + 5.0 - (time.monotonic() - wait_started)
             if remaining <= 0 or not flight.done.wait(timeout=remaining):
                 return self._failure(
-                    "timeout", "timed out waiting for in-flight quota probe", current_key
+                    "timeout", "timed out waiting for in-flight quota probe", flight.key
                 )
-            if flight_key != current_key:
-                # Serialize different contexts too: one subprocess, not one per
-                # arbitrarily changing key. Re-evaluate after the old flight.
-                continue
-            try:
-                valid_key = self._get_cache_key()
-            except Exception:
-                valid_key = None
+            if flight.key is not None:
+                try:
+                    valid_key = self._get_cache_key()
+                except Exception:
+                    return self._failure(
+                        "unavailable", "quota context changed during refresh", flight.key
+                    )
+                if valid_key != flight.key:
+                    # Different contexts remain serialized. Refresh the new
+                    # context, rather than reuse the old flight's response.
+                    continue
             with self._lock:
-                valid = generation == self._generation and valid_key == current_key
+                valid = generation == self._generation
             if not valid:
                 return self._failure(
-                    "unavailable", "quota context changed during refresh", current_key
+                    "unavailable", "quota context changed during refresh", flight.key
                 )
             if flight.response is not None:
+                if force_refresh and flight.response.cached:
+                    # A normal leader may only have read the cache. Joining it
+                    # cannot satisfy a forced caller's request for fresh data.
+                    continue
                 return copy.deepcopy(flight.response)
             return self._failure(
-                "unavailable", "in-flight probe terminated without response", current_key
+                "unavailable", "in-flight probe terminated without response", flight.key
             )
 
-        # Initialize the failure before executing, including BaseException exits,
-        # so waiters are always released even if the leader is interrupted.
-        response = self._failure("unavailable", "quota probe interrupted", current_key)
-        valid_key = None
+    def _refresh(
+        self, flight: _InFlight, generation: int, force_refresh: bool
+    ) -> QuotaToolResponse:
+        # Preparation is part of the flight. Release waiters even if detection
+        # raises BaseException, not just if quota execution is interrupted.
+        response = self._failure("unavailable", "quota probe interrupted")
+        current_key = valid_key = None
+        cache_hit = False
         try:
-            response = self._run_probe(current_key)
-            valid_key = self._get_cache_key()
+            try:
+                current_key = self._get_cache_key(refresh=force_refresh)
+            except Exception as exc:
+                self.invalidate()
+                response = self._failure("unavailable", f"failed to determine cache key: {exc}")
+            else:
+                with self._lock:
+                    self._in_flight_map.pop(None, None)
+                    self._in_flight_map[current_key] = flight
+                    flight.key = current_key
+                    if (
+                        not force_refresh
+                        and not current_key[3]
+                        and self._cached_response is not None
+                        and self._cached_key == current_key
+                    ):
+                        age = time.monotonic() - self._cached_mono
+                        if age < CACHE_TTL_SECONDS:
+                            response = copy.deepcopy(self._cached_response).model_copy(
+                                update={"cached": True, "age_seconds": max(0.0, round(age, 3))}
+                            )
+                            cache_hit = True
+                if current_key[3]:
+                    response = self._failure(
+                        "unsupported", "slash commands disabled by operator policy", current_key
+                    )
+                elif not cache_hit:
+                    response = self._run_probe(current_key)
+                valid_key = self._get_cache_key()
         except Exception as exc:
             response = self._failure(
                 "unavailable", f"unexpected probe execution error: {exc}", current_key
@@ -682,21 +700,24 @@ class QuotaProbe:
         finally:
             with self._lock:
                 try:
-                    if generation != self._generation or valid_key != current_key:
+                    if current_key is not None and (
+                        generation != self._generation or valid_key != current_key
+                    ):
                         response = self._failure(
                             "unavailable", "quota context changed during refresh", current_key
                         )
                     if response.success:
-                        self._cached_response = copy.deepcopy(response)
-                        self._cached_mono = time.monotonic()
-                        self._cached_key = current_key
+                        if not cache_hit:
+                            self._cached_response = copy.deepcopy(response)
+                            self._cached_mono = time.monotonic()
+                            self._cached_key = current_key
                     else:
                         self._cached_response = None
                         self._cached_mono = 0.0
                         self._cached_key = None
                     flight.response = response
                 finally:
-                    self._in_flight_map.pop(current_key, None)
+                    self._in_flight_map.pop(flight.key, None)
                     flight.done.set()
         return copy.deepcopy(response)
 

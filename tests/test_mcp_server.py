@@ -1829,14 +1829,14 @@ def test_agy_quota_concurrent_boundary_single_flight(reset_state, monkeypatch):
     release = threading.Event()
     arrivals = 0
     lock = threading.Lock()
-    original_key = server.QuotaProbe._get_cache_key
+    original_get = server.QuotaProbe.get
     executions = []
 
-    def key(*args, **kwargs):
+    def get(*args, **kwargs):
         nonlocal arrivals
         with lock:
             arrivals += 1
-        return original_key(*args, **kwargs)
+        return original_get(*args, **kwargs)
 
     def run(probe, context):
         executions.append(probe)
@@ -1844,7 +1844,9 @@ def test_agy_quota_concurrent_boundary_single_flight(reset_state, monkeypatch):
         assert release.wait(3)
         return QuotaToolResponse(success=True)
 
-    monkeypatch.setattr(server.QuotaProbe, "_get_cache_key", key)
+    # Waiters now join before capability detection; observe tool arrivals, not
+    # redundant cache-key/detection work that coalescing deliberately removes.
+    monkeypatch.setattr(server.QuotaProbe, "get", get)
     monkeypatch.setattr(server.QuotaProbe, "_run_probe", run)
 
     async def check():

@@ -125,7 +125,7 @@ Progress evidence:
   describe incomplete measurements, not inferred zero cost.
 - Final audit maps all design/acceptance requirements to the source, promoted
   synthetic cases, full tests, receipts and documented limits. No further code
-  edits after final acceptance. Only CLI 1.3.3/macOS was live-tested; Windows and
+  edits before the initial publication. Only CLI 1.3.3/macOS was live-tested; Windows and
   escaped-session cleanup remain unguaranteed, binary/account fingerprint limits
   remain documented, and deployed MCP processes were not reloaded/reinstalled.
 - Publication follow-up: operator requested "Please open a PR." Scope is the
@@ -133,6 +133,25 @@ Progress evidence:
   reviewed credential-free evidence receipts. Exclude unrelated untracked plans
   and the separate orchestration lab. Base: `bmorrison/agy-mcp:main`; head:
   `feat/model-family-quota-visibility`. No merge, release or deployment restart.
+- PR #4 repair follow-up (2026-10-12): the operator authorized verification,
+  confirmed fixes in one commit, resolving addressed threads, and Codex re-review.
+  All four findings reproduced: mutable auth-evidence mtimes (P1), losing valid
+  help capabilities after failed version capture (P2), generic policy phrases in
+  successful bucket descriptions (P2), and repeated forced capability detection
+  before joining a refresh (P2). Initial targeted gate: **10 failed, 4 passed**.
+  Repairs use stable auth-evidence kind/path (not account identity), retain valid
+  help while leaving failed version capture unverified, require explicit slash
+  context, and reserve the flight before detection. Independent edge review also
+  reproduced and repaired a forced waiter accepting a normal leader's cache hit.
+  Added 17 regression cases, including interrupted/invalidated preparation and
+  deterministic joins during both detection and quota execution. Updated two old
+  test assumptions: version failure must not erase valid help, and MCP callers
+  must join before cache-key preparation. Focused/frozen gate: **205 passed in
+  17.00s**; full suite: **905 passed in 36.08s**; lint and whitespace clean.
+  Fresh-source offline stdio smoke verified 13 tools,
+  zero inference, zero jobs, cache/force behavior and balance-independent doctor.
+  Prior live receipts and orchestration recording cutoff remain unchanged; no
+  additional real quota query, credential read, deployment refresh or merge.
 
 ## Goal
 
