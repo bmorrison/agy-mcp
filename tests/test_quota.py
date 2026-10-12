@@ -1157,17 +1157,19 @@ def test_caller_mutation_does_not_corrupt_cache():
     assert len(resp2.groups) == 2
 
 
-def test_unauthenticated_fails_before_spawning():
+def test_undetected_auth_attempts_probe_and_classifies_cli_failure():
     adapter = FakeAdapter(version="1.3.3", authenticated=False)
     probe = QuotaProbe(adapter=adapter)
 
-    with patch.object(probe, "_execute_command") as mock_exec:
+    with patch.object(
+        probe, "_execute_command", return_value=(1, "", "auth error: credentials unavailable")
+    ) as mock_exec:
         resp = probe.get()
-        assert mock_exec.call_count == 0
+        mock_exec.assert_called_once_with(adapter.fake_bin_path)
 
     assert resp.success is False
     assert resp.status == "auth_error"
-    assert "authentication unavailable" in (resp.error or "")
+    assert "authentication failure" in (resp.error or "")
 
 
 def test_cache_key_exception_returns_typed_failure():
@@ -1195,7 +1197,7 @@ def test_in_flight_timeout_returns_typed_failure(monkeypatch):
         return QuotaToolResponse(success=True)
 
     monkeypatch.setattr(probe, "_run_probe", hang_probe)
-    monkeypatch.setattr(quota_mod, "QUOTA_PROCESS_DEADLINE_S", 0.1)
+    monkeypatch.setattr(quota_mod, "_refresh_wait_budget_s", lambda: 0.1)
 
     results: list[QuotaToolResponse] = []
 
@@ -1209,8 +1211,10 @@ def test_in_flight_timeout_returns_typed_failure(monkeypatch):
     t2.join(timeout=3.0)
     blocker.set()
     t1.join(timeout=3.0)
+    t2.join(timeout=3.0)
 
-    assert any(r.status in ("timeout", "ok") for r in results)
+    assert not t1.is_alive() and not t2.is_alive()
+    assert any(r.status == "timeout" for r in results)
 
 # ---------------------------------------------------------------------------
 # 7. Deadline / byte-overflow / context lifecycle regressions
@@ -1732,8 +1736,12 @@ def test_auth_metadata_change_refreshes_cached_authenticated_capability(monkeypa
     assert probe.get().success
     context[0] = "none"
     adapter.fake_authenticated = False
+    # Local evidence disappearing invalidates the cache, not CLI credentials.
+    # Only the actual command's failure establishes an auth error.
+    execute.return_value = (1, "", "auth error: credentials expired")
     assert probe.get().status == "auth_error"
-    assert execute.call_count == 1
+    assert adapter.cap.authenticated is False
+    assert execute.call_count == 2
 
 
 def test_execution_exception_keeps_bounded_redacted_error_and_releases_flight(monkeypatch):

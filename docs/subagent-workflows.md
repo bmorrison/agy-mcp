@@ -148,8 +148,15 @@ Successful snapshots are cached in memory for 30 seconds, with `observed_at`,
 coalesces an already-running refresh. Failed refreshes return explicit failure,
 not stale success. Auth context is fingerprinted without reading private account
 contents; account switches without a detectable context change can remain cached
-for the TTL. Force refresh after switching accounts. Unknown/unsupported formats,
-auth failures, timeouts, and unavailable binaries are explicit statuses.
+for the TTL. Force refresh after switching accounts. Missing/stale local auth
+evidence is inconclusive, not a confirmed logout: the bounded CLI query uses its
+existing auth and classifies actual CLI failures. Metadata may reveal previously
+unknown auth evidence without rejecting a validated fresh result; cached results
+are never rebound to newly discovered evidence. Coalesced callers allow 80 seconds
+by default for detection, possible evidence-driven re-detection, quota execution
+and cleanup; the quota command's own deadline remains 30 seconds.
+Unknown/unsupported formats, auth failures, timeouts, and unavailable binaries
+are explicit statuses.
 The quota command and CLI detection probes disable auto-update only in their
 subprocess environments. Cleanup is validated for POSIX owned-group descendants,
 not escaped sessions; Windows tree cleanup has no Job Object guarantee and is

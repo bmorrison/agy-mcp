@@ -152,6 +152,27 @@ Progress evidence:
   zero inference, zero jobs, cache/force behavior and balance-independent doctor.
   Prior live receipts and orchestration recording cutoff remain unchanged; no
   additional real quota query, credential read, deployment refresh or merge.
+- Codex review round 2 reviewed `a2f9534` and raised three new findings: Windows
+  batch launchers bypassing preparation (P1), single-flight waits covering only
+  quota execution rather than detection (P2), and treating absent auth evidence
+  as confirmed logout (P2). The operator authorized repeating the repair/review
+  cycle until current-head Codex green, without merge/deployment changes.
+  Parent reproduced **8 failing cases** (one .exe control passed): Windows
+  .cmd/.bat preparation at the mocked subprocess boundary, premature waiter
+  expiration in a deterministic full-budget simulation, actual synthetic CLI
+  outcomes with absent auth evidence, and probe-created auth evidence.
+  Windows now uses the existing `shell=False` launcher preparation helper;
+  native Windows execution remains untested. The quota command deadline stays
+  30s; waiters allow 80s for initial detection, one evidence-driven re-detection
+  and bounded cleanup/drain. Unknown auth evidence now permits the bounded CLI
+  query, with actual CLI auth errors/timeouts classified rather than invented.
+  Previously unknown evidence revealed by metadata may scope a fresh result,
+  but cached balances are never rebound and known context/policy changes remain
+  rejected. Added 12 regression cases, including rekeying coalesced waiters and
+  rejecting new evidence during a cache read. Updated old auth-gating assumptions
+  and strengthened the explicit waiter-timeout test. **308 focused/frozen passed
+  in 16.87s; 917 full tests passed in 36.75s**; lint, whitespace and fresh-source
+  offline stdio smoke passed. Earlier live receipts/lab cutoff remain unchanged.
 
 ## Goal
 

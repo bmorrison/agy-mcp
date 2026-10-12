@@ -4,8 +4,8 @@ Safe-account-identity limitation:
 Because private account credentials, OAuth tokens, and emails must never be
 read or inspected, QuotaProbe cannot identify the active account ID directly.
 Therefore, if an operator switches accounts out-of-band while the agy binary,
-CLI version, and auth-source file mtime remain unchanged, the probe may return
-a cached snapshot up to 30 seconds old unless ``force_refresh=True`` is passed.
+CLI version, and auth-evidence source kind/path remain unchanged, the probe may
+return a cached snapshot up to 30 seconds old unless ``force_refresh=True`` is passed.
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ from typing import Any
 
 from agy_mcp.adapters.agy import (
     AGY_BINARY_NAME,
+    AGY_HELP_TIMEOUT_S,
+    AGY_VERSION_TIMEOUT_S,
     AgyPrintBackend,
     detect_agy_auth_source,
 )
@@ -63,6 +65,14 @@ CACHE_TTL_SECONDS: float = 30.0
 QUOTA_SOURCE: str = "agy:/quota"
 _MAX_ERROR_CHARS: int = 2048
 _CacheKey = tuple[str, str | None, str | None, bool, tuple[Any, ...]]
+
+
+def _refresh_wait_budget_s() -> float:
+    # Initial help/version plus one evidence-driven re-detection (for example,
+    # a previously undetected keyring login revealed by metadata itself), quota,
+    # and cleanup/drain grace for all five subprocesses. The quota command's
+    # own 30-second deadline is unchanged.
+    return QUOTA_PROCESS_DEADLINE_S + 2 * (AGY_HELP_TIMEOUT_S + AGY_VERSION_TIMEOUT_S) + 10.0
 
 
 def _safety_config_signature(
@@ -587,6 +597,27 @@ class QuotaProbe:
         except Exception:
             return "unknown"
 
+    @staticmethod
+    def _same_probe_context(before: _CacheKey, after: _CacheKey | None) -> bool:
+        if before == after:
+            return True
+        if after is None:
+            return False
+        # Absence of local auth evidence is unknown, not a bound account.
+        # Metadata can reveal a valid keyring login itself. Accept only this
+        # one-way discovery, never loss/change of known evidence or changes to
+        # the executable, version, slash policy or safety configuration.
+        return (
+            before[2] in {"none", "unknown"}
+            and after[2] not in {None, "none", "unknown"}
+            and before[4][1] is False
+            and after[4][1] is True
+            and before[:2] == after[:2]
+            and before[3] == after[3]
+            and before[4][0] == after[4][0]
+            and before[4][2] == after[4][2]
+        )
+
     def _failure(
         self, status: QuotaStatus, message: str, key: _CacheKey | None = None
     ) -> QuotaToolResponse:
@@ -619,7 +650,7 @@ class QuotaProbe:
 
             if wait_started is None:
                 wait_started = time.monotonic()
-            remaining = QUOTA_PROCESS_DEADLINE_S + 5.0 - (time.monotonic() - wait_started)
+            remaining = _refresh_wait_budget_s() - (time.monotonic() - wait_started)
             if remaining <= 0 or not flight.done.wait(timeout=remaining):
                 return self._failure(
                     "timeout", "timed out waiting for in-flight quota probe", flight.key
@@ -699,30 +730,39 @@ class QuotaProbe:
                 valid_key = None
         finally:
             with self._lock:
+                reserved_key = flight.key
                 try:
+                    context_matches = current_key is not None and (
+                        valid_key == current_key if cache_hit
+                        else self._same_probe_context(current_key, valid_key)
+                    )
                     if current_key is not None and (
-                        generation != self._generation or valid_key != current_key
+                        generation != self._generation or not context_matches
                     ):
                         response = self._failure(
                             "unavailable", "quota context changed during refresh", current_key
                         )
+                    elif context_matches:
+                        # Publish and let waiters validate the newly discovered
+                        # evidence, not the pre-command unknown auth heuristic.
+                        flight.key = valid_key
                     if response.success:
                         if not cache_hit:
                             self._cached_response = copy.deepcopy(response)
                             self._cached_mono = time.monotonic()
-                            self._cached_key = current_key
+                            self._cached_key = valid_key
                     else:
                         self._cached_response = None
                         self._cached_mono = 0.0
                         self._cached_key = None
                     flight.response = response
                 finally:
-                    self._in_flight_map.pop(flight.key, None)
+                    self._in_flight_map.pop(reserved_key, None)
                     flight.done.set()
         return copy.deepcopy(response)
 
     def _run_probe(self, current_key: _CacheKey) -> QuotaToolResponse:
-        bin_path, version, _, slash_disabled, context = current_key
+        bin_path, version, _, slash_disabled, _ = current_key
 
         if slash_disabled or check_slash_commands_disabled():
             return QuotaToolResponse(
@@ -760,20 +800,10 @@ class QuotaProbe:
                 source=QUOTA_SOURCE,
             )
 
-        # Fail explicitly before spawning if auth is detected unavailable
-        if not context[1]:
-            return QuotaToolResponse(
-                success=False,
-                status="auth_error",
-                error=_bounded_error(
-                    "authentication unavailable: client not logged in", self.safety
-                ),
-                backend="agy",
-                cli_version=self.safety.redact(version) if version else None,
-                source=QUOTA_SOURCE,
-            )
-
-        if self._get_cache_key() != current_key:
+        # Auth capability is a local-evidence heuristic: missing/stale logs do
+        # not prove logout. Let the bounded command use existing CLI auth, then
+        # classify actual auth errors or timeout without initiating login.
+        if not self._same_probe_context(current_key, self._get_cache_key()):
             return self._failure(
                 "unavailable", "quota context changed before execution", current_key
             )

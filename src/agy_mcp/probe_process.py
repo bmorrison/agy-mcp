@@ -15,6 +15,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from agy_mcp.utils import prepare_subprocess_command
+
 MAX_PROBE_OUTPUT_BYTES = 1024 * 1024
 INVALID_OUTPUT_EXIT = -1000  # Capture failure, distinct from negative signal exits.
 
@@ -143,10 +145,11 @@ def run_bounded_process(
     from agy_mcp.adapters.base import _process_group_kwargs
 
     kwargs = _process_group_kwargs()
+    popen_arg, _wrapped = prepare_subprocess_command(cmd, env)
 
     try:
         proc = subprocess.Popen(
-            cmd,
+            popen_arg,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,

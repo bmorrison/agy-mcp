@@ -82,7 +82,13 @@ on a verified version. Auth evidence uses source kind/path, not mutable log or
 credential-file mtimes: CLI log rotation and token refresh are not account
 identity changes. Account identity is not read: force refresh after switching
 accounts, since a switch without a detectable context change can remain cached
-for the TTL.
+for the TTL. Missing/stale auth evidence does not prove logout: the bounded CLI
+query uses existing CLI auth and reports actual auth failures or timeout. A fresh
+query may reveal previously unknown auth evidence; validated fresh results use
+that new evidence, but cached balances are never rebound. Known evidence changes
+and executable/policy changes still reject publication. The quota command keeps
+its 30-second deadline; coalesced callers have a default 80-second joining budget
+for initial detection, one evidence-driven re-detection and cleanup/drain grace.
 The quota command and adapter help/version probe environments disable CLI
 auto-update without changing persistent settings. Programmatic callers supplying
 both an adapter and explicit safety policy must use compatible configurations;
