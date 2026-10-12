@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -735,7 +736,7 @@ def test_cache_hit_within_30s_ttl():
     resp1 = probe.get()
     assert resp1.success is True
     assert resp1.cached is False
-    assert resp1.age_seconds == 0.0
+    assert resp1.age_seconds >= 0.0
     assert mock_exec.call_count == 1
 
     # Second call within TTL: cache hit
@@ -746,29 +747,31 @@ def test_cache_hit_within_30s_ttl():
     assert mock_exec.call_count == 1  # Subprocess not called again
 
 
-def test_cache_expiry_after_30s_monotonic_ttl():
+def test_cache_expiry_after_30s_monotonic_ttl(monkeypatch):
     adapter = FakeAdapter(version="1.3.3")
     probe = QuotaProbe(adapter=adapter)
 
     mock_exec = MagicMock(return_value=(0, make_synthetic_quota_json(), ""))
     probe._execute_command = mock_exec  # type: ignore[assignment]
 
-    mono_times = [100.0, 110.0, 131.0]
+    from agy_mcp import quota as quota_mod
 
-    with patch("time.monotonic", side_effect=lambda: mono_times.pop(0) if mono_times else 200.0):
-        resp1 = probe.get()
-        assert resp1.cached is False
-        assert mock_exec.call_count == 1
+    clock = [100.0]
+    monkeypatch.setattr(quota_mod, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    resp1 = probe.get()
+    assert resp1.cached is False
+    assert mock_exec.call_count == 1
 
-        # At t=110s (age=10s): hit
-        resp2 = probe.get()
-        assert resp2.cached is True
-        assert mock_exec.call_count == 1
+    # Advance the clock explicitly, independent of internal clock-read count.
+    clock[0] = 110.0
+    resp2 = probe.get()
+    assert resp2.cached is True and resp2.age_seconds == 10.0
+    assert mock_exec.call_count == 1
 
-        # At t=131s (age=31s > 30s): expired, fresh probe
-        resp3 = probe.get()
-        assert resp3.cached is False
-        assert mock_exec.call_count == 2
+    clock[0] = 131.0
+    resp3 = probe.get()
+    assert resp3.cached is False
+    assert mock_exec.call_count == 2
 
 
 def test_force_refresh_bypasses_cache():

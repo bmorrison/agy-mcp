@@ -78,7 +78,11 @@ subprocess output/deadlines are bounded. A 30-second in-memory successful-result
 cache coalesces the whole refresh, including forced help/version detection;
 a failed refresh never becomes a stale success. Valid help capabilities remain
 usable for ordinary inference if version capture fails, but quota stays gated
-on a verified version. Auth evidence uses source kind/path, not mutable log or
+on a recognized version from successful `--version` output, not help fallback.
+TTL and `age_seconds` start at observation, including later validation/queue delay
+even on uncached results. Validated success JSON takes precedence over policy-like
+description text; unstructured/failed responses still get policy-error checks.
+Auth evidence uses source kind/path, not mutable log or
 credential-file mtimes: CLI log rotation and token refresh are not account
 identity changes. Account identity is not read: force refresh after switching
 accounts, since a switch without a detectable context change can remain cached

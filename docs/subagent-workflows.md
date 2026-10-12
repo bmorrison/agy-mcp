@@ -144,7 +144,9 @@ invent separate balances for each family or turn fractions into request counts.
 A snapshot is not a guarantee of successful inference or a billing meter.
 
 Successful snapshots are cached in memory for 30 seconds, with `observed_at`,
-`cached`, and `age_seconds`. `force_refresh=True` bypasses a cached snapshot and
+`cached`, and `age_seconds`. TTL/age start at observation rather than after
+post-command validation; even an uncached result can have a nonzero age.
+`force_refresh=True` bypasses a cached snapshot and
 coalesces an already-running refresh. Failed refreshes return explicit failure,
 not stale success. Auth context is fingerprinted without reading private account
 contents; account switches without a detectable context change can remain cached

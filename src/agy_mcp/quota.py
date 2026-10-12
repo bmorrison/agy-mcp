@@ -75,6 +75,10 @@ def _refresh_wait_budget_s() -> float:
     return QUOTA_PROCESS_DEADLINE_S + 2 * (AGY_HELP_TIMEOUT_S + AGY_VERSION_TIMEOUT_S) + 10.0
 
 
+def _snapshot_age(observed_mono: float) -> float:
+    return max(0.0, round(time.monotonic() - observed_mono, 3))
+
+
 def _safety_config_signature(
     safety: SafetyPolicy,
 ) -> tuple[frozenset[str], tuple[str, ...], frozenset[str]]:
@@ -476,6 +480,7 @@ class _InFlight:
         self.done = threading.Event()
         self.response: QuotaToolResponse | None = None
         self.key: _CacheKey | None = None
+        self.observed_mono: float | None = None
 
 
 class QuotaProbe:
@@ -677,7 +682,10 @@ class QuotaProbe:
                     # A normal leader may only have read the cache. Joining it
                     # cannot satisfy a forced caller's request for fresh data.
                     continue
-                return copy.deepcopy(flight.response)
+                response = copy.deepcopy(flight.response)
+                if response.success and flight.observed_mono is not None:
+                    response.age_seconds = _snapshot_age(flight.observed_mono)
+                return response
             return self._failure(
                 "unavailable", "in-flight probe terminated without response", flight.key
             )
@@ -713,12 +721,17 @@ class QuotaProbe:
                                 update={"cached": True, "age_seconds": max(0.0, round(age, 3))}
                             )
                             cache_hit = True
+                            flight.observed_mono = self._cached_mono
                 if current_key[3]:
                     response = self._failure(
                         "unsupported", "slash commands disabled by operator policy", current_key
                     )
                 elif not cache_hit:
                     response = self._run_probe(current_key)
+                    if response.success:
+                        # Match observed_at before post-command detection can
+                        # delay publication; TTL must not restart after it.
+                        flight.observed_mono = time.monotonic()
                 valid_key = self._get_cache_key()
         except Exception as exc:
             response = self._failure(
@@ -747,9 +760,11 @@ class QuotaProbe:
                         # evidence, not the pre-command unknown auth heuristic.
                         flight.key = valid_key
                     if response.success:
+                        assert flight.observed_mono is not None
+                        response.age_seconds = _snapshot_age(flight.observed_mono)
                         if not cache_hit:
                             self._cached_response = copy.deepcopy(response)
-                            self._cached_mono = time.monotonic()
+                            self._cached_mono = flight.observed_mono
                             self._cached_key = valid_key
                     else:
                         self._cached_response = None
@@ -813,7 +828,7 @@ class QuotaProbe:
         if exit_code == _INVALID_OUTPUT_EXIT:
             return self._failure("invalid_response", stderr, current_key)
 
-        if is_slash_disabled_error(stdout, stderr):
+        if exit_code != 0 and is_slash_disabled_error(stdout, stderr):
             return QuotaToolResponse(
                 success=False,
                 status="unsupported",
@@ -873,6 +888,12 @@ class QuotaProbe:
         try:
             groups = parse_quota_json(stdout, safety=self.safety)
         except QuotaParseError as exc:
+            # Validated successful JSON takes precedence over arbitrary
+            # descriptions/diagnostics. Scan prose only when validation fails.
+            if is_slash_disabled_error(stdout, stderr):
+                return self._failure(
+                    "unsupported", "slash commands disabled by operator policy", current_key
+                )
             return QuotaToolResponse(
                 success=False,
                 status="invalid_response",

@@ -399,7 +399,9 @@ class AgyPrintBackend(BaseAdapter):
             # version capture must not fall back to help to authorize quota.
             cap.warnings.append(f"capability probe failed: {exc}")
         else:
-            cap.version = _parse_version(version_text) or _parse_version_from_help(help_text)
+            cap.version = _parse_version(version_text)
+            if cap.version is None:
+                cap.warnings.append("capability version probe returned no recognized version")
 
         if not cap.authenticated:
             cap.warnings.append(

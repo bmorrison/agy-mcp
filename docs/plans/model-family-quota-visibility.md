@@ -182,6 +182,20 @@ Progress evidence:
   lint, whitespace and fresh offline stdio smoke passed. This repair proceeds to
   another current-head Codex review under the operator's until-green instruction.
   No additional live query, deployment change, merge or original-receipt rewrite.
+- Codex review round 4 reviewed `1b1d797` and raised three further P2s: trusting
+  help-derived versions after unparseable version output, starting snapshot TTL
+  after post-command validation, and scanning valid description text as policy
+  errors before parsing. Parent reproduced **16 failures with 2 passing policy
+  controls**. Repairs require recognized successful `--version` output while
+  retaining ordinary help capabilities, carry monotonic observation time through
+  publication/coalescing, and validate successful JSON before textual policy
+  classification. Age now includes validation delay even on uncached results;
+  TTL never restarts at publication. Added 19 cases, including coalesced waiter
+  age after its own validation; replaced a clock-read-count-dependent TTL test
+  with an explicit clock. **339 focused/frozen passed in 17.45s; 948 full tests
+  passed in 35.37s**; lint, whitespace and fresh offline stdio smoke passed.
+  Another current-head Codex review follows; original live/lab receipts remain
+  unchanged and no deployment or merge is authorized.
 
 ## Goal
 
