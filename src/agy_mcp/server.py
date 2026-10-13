@@ -11,6 +11,7 @@ Tools (all return dicts with stable keys; never raise across the wire):
 * ``agy_cancel`` — signal a running job to stop.
 * ``agy_sessions`` — list recent jobs.
 * ``agy_doctor`` — environment + capability probe.
+* ``agy_quota`` — read-only Antigravity quota snapshot (no inference).
 * ``agy_install_skill`` — write the scaffold skill into target dirs.
 
 Threading model: the FastMCP runtime drives tools from an asyncio loop and
@@ -55,12 +56,14 @@ from agy_mcp.models import (
     Mode,
     OutputProtocol,
     PurgeToolResponse,
+    QuotaToolResponse,
     ReadToolResponse,
     ResultToolResponse,
     SessionsToolResponse,
     StatusToolResponse,
     TranscriptToolResponse,
 )
+from agy_mcp.quota import QuotaProbe
 from agy_mcp.safety import SafetyPolicy
 from agy_mcp.session_store import SessionStore
 from agy_mcp.supervisor import Supervisor
@@ -86,6 +89,7 @@ _supervisor: Supervisor | None = None
 # Phase 5 R1 arch P1.5.
 _agy_adapter: AgyPrintBackend | None = None
 _gemini_adapter: GeminiCliBackend | None = None
+_quota_probe: QuotaProbe | None = None
 
 # Defence-in-depth cap so a malicious or buggy caller can't burn unbounded
 # memory by passing a multi-megabyte string in place of a job_id slug. We
@@ -110,6 +114,8 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,96}$")
 # each instance is bound to the asyncio loop that created it — so we cache
 # per running loop id rather than process-globally (Phase 5 R3 arch P1).
 _BRIDGE_CONCURRENCY = 8
+# Metadata must not queue behind inference calls that can run for hours.
+_QUOTA_CONCURRENCY = 8
 # Phase 5 R3 P3.14: keyed on the running loop object itself via
 # WeakKeyDictionary so a GC'd loop drops its limiter automatically.
 # (The previous ``dict[int, ...]`` keyed on ``id(loop)`` was correct
@@ -119,6 +125,9 @@ _bridge_limiters_by_loop: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, anyio.CapacityLimiter
 ] = weakref.WeakKeyDictionary()
 _bridge_limiter_lock = threading.Lock()
+_quota_limiters_by_loop: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, anyio.CapacityLimiter
+] = weakref.WeakKeyDictionary()
 
 # Defence-in-depth cap on the install-skill argument surface
 # (Phase 5 R2 security P1-1). 16 is well above the four documented
@@ -166,14 +175,17 @@ def _ensure_adapters(*, force_refresh: bool = False) -> tuple[AgyPrintBackend, G
     the MCP server. (Phase 5 R2 security P2-1.)
     """
 
-    global _agy_adapter, _gemini_adapter
-    _, safety, _store_, _supervisor_ = _ensure_state()
+    global _agy_adapter, _gemini_adapter, _quota_probe
+    config, safety, _store_, _supervisor_ = _ensure_state()
     with _state_lock:
         if force_refresh:
+            if _quota_probe is not None:
+                _quota_probe.invalidate()
+            _quota_probe = None
             _agy_adapter = None
             _gemini_adapter = None
         if _agy_adapter is None:
-            _agy_adapter = AgyPrintBackend(safety=safety)
+            _agy_adapter = AgyPrintBackend(bin_override=config.backend.agy_bin, safety=safety)
         if _gemini_adapter is None:
             _gemini_adapter = GeminiCliBackend(safety=safety)
         return _agy_adapter, _gemini_adapter
@@ -201,18 +213,29 @@ async def _get_bridge_limiter() -> anyio.CapacityLimiter:
         return limiter
 
 
+async def _get_quota_limiter() -> anyio.CapacityLimiter:
+    """Independent per-loop metadata capacity, never borrowed by inference."""
+    loop = asyncio.get_running_loop()
+    with _bridge_limiter_lock:
+        limiter = _quota_limiters_by_loop.get(loop)
+        if limiter is None:
+            limiter = anyio.CapacityLimiter(_QUOTA_CONCURRENCY)
+            _quota_limiters_by_loop[loop] = limiter
+        return limiter
+
+
 def _reset_state_for_tests() -> None:
     """Drop the cached singletons so tests can swap in fresh stores.
 
     Holds ``_state_lock`` and ``_bridge_limiter_lock`` while wiping.
     **Invariant for future maintainers:** callbacks invoked while
     those locks are held MUST NOT call back into ``_ensure_state``
-    / ``_ensure_adapters`` / ``_get_bridge_limiter``, or the test
-    teardown will deadlock. The current implementation only mutates
-    module-level globals — keep it that way (Phase 5 R2 P3.7).
+    / ``_ensure_adapters`` / either limiter accessor, or the test
+    teardown will deadlock. Quota invalidation must remain an in-memory
+    cache/generation operation with no state or limiter callbacks (Phase 5 R2 P3.7).
     """
 
-    global _config, _safety, _store, _supervisor, _agy_adapter, _gemini_adapter
+    global _config, _safety, _store, _supervisor, _agy_adapter, _gemini_adapter, _quota_probe
     with _state_lock:
         _config = None
         _safety = None
@@ -220,8 +243,12 @@ def _reset_state_for_tests() -> None:
         _supervisor = None
         _agy_adapter = None
         _gemini_adapter = None
+        if _quota_probe is not None:
+            _quota_probe.invalidate()
+        _quota_probe = None
     with _bridge_limiter_lock:
         _bridge_limiters_by_loop.clear()
+        _quota_limiters_by_loop.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -959,6 +986,56 @@ def agy_doctor_tool(force_refresh: bool = False) -> DoctorToolResponse:
 
 
 # ---------------------------------------------------------------------------
+# Tool: agy_quota — dedicated read-only metadata probe
+# ---------------------------------------------------------------------------
+
+
+def _get_quota_snapshot(force_refresh: bool) -> QuotaToolResponse:
+    """Initialize and probe entirely in a bounded worker, never the event loop."""
+    global _quota_probe
+    safety = _safety or SafetyPolicy()
+    try:
+        config, safety, _store_, _supervisor_ = _ensure_state()
+        with _state_lock:
+            if (
+                _quota_probe is None
+                or _quota_probe.adapter.bin_override != config.backend.agy_bin
+                or _quota_probe.adapter.safety is not safety
+            ):
+                if _quota_probe is not None:
+                    _quota_probe.invalidate()
+                # Metadata detection owns its adapter. A failed re-probe must
+                # not overwrite doctor's cached capabilities or routing state.
+                adapter = AgyPrintBackend(bin_override=config.backend.agy_bin, safety=safety)
+                _quota_probe = QuotaProbe(adapter=adapter, safety=safety)
+            probe = _quota_probe
+        return probe.get(force_refresh=force_refresh)
+    except Exception as exc:  # noqa: BLE001 - includes initialization failures
+        return QuotaToolResponse(
+            success=False,
+            status="unavailable",
+            error=safety.redact(str(exc))[:2048],
+        )
+
+
+@mcp.tool(
+    name="agy_quota",
+    description=(
+        "Read Antigravity CLI /quota metadata without an inference turn. "
+        "Reports shared upstream quota groups and reset times, not guaranteed "
+        "availability. Successful snapshots are cached for 30 seconds; "
+        "force_refresh bypasses the cache and coalesces an active refresh. "
+        "No model or backend fallback."
+    ),
+)
+async def agy_quota_tool(force_refresh: bool = False) -> QuotaToolResponse:
+    limiter = await _get_quota_limiter()
+    return await anyio.to_thread.run_sync(
+        _get_quota_snapshot, force_refresh, limiter=limiter,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Tool: agy_install_skill — write scaffold skill into target dirs
 # ---------------------------------------------------------------------------
 
@@ -1308,6 +1385,7 @@ __all__ = [
     "agy_doctor_tool",
     "agy_install_skill_tool",
     "agy_purge_tool",
+    "agy_quota_tool",
     "agy_read_tool",
     "agy_result_tool",
     "agy_sessions_tool",

@@ -46,13 +46,17 @@ from agy_mcp.models import (
     Capability,
     Mode,
 )
+from agy_mcp.probe_process import (
+    INVALID_OUTPUT_EXIT,
+    MAX_PROBE_OUTPUT_BYTES,
+    run_bounded_process,
+)
 from agy_mcp.safety import SafetyPolicy
 from agy_mcp.utils import (
     augment_path_env_for_windows,
     is_windows,
     open_transcript_no_follow,
     prepare_subprocess_command,
-    scrub_env,
     truncate_middle,
     utc_now_iso,
     windows_escape,
@@ -324,6 +328,10 @@ def parse_footer_and_validate(
 # ---------------------------------------------------------------------------
 
 
+class _CapabilityProbeError(RuntimeError):
+    """Detection output cannot safely authorize a headless quota command."""
+
+
 class AgyPrintBackend(BaseAdapter):
     backend: BackendName = "agy"
 
@@ -349,10 +357,14 @@ class AgyPrintBackend(BaseAdapter):
             )
             return cap
 
-        help_text = self._run_probe([bin_path, "--help"], timeout=AGY_HELP_TIMEOUT_S)
-        version_text = self._run_probe([bin_path], extra=["--version"], timeout=AGY_VERSION_TIMEOUT_S)
+        try:
+            help_text = self._run_probe(
+                [bin_path, "--help"], timeout=AGY_HELP_TIMEOUT_S, safety=self.safety
+            )
+        except _CapabilityProbeError as exc:
+            cap.warnings.append(f"capability probe failed: {exc}")
+            return cap
         cap.raw_help = help_text or None
-        cap.version = _parse_version(version_text) or _parse_version_from_help(help_text)
 
         text = help_text or ""
         cap.supports_print = has_flag(text, "--print", "-p", "--prompt")
@@ -378,6 +390,19 @@ class AgyPrintBackend(BaseAdapter):
         cap.supports_streaming = False
         cap.supports_tool_events = False
 
+        try:
+            version_text = self._run_probe(
+                [bin_path], extra=["--version"], timeout=AGY_VERSION_TIMEOUT_S, safety=self.safety
+            )
+        except _CapabilityProbeError as exc:
+            # Valid help still authorizes ordinary print capabilities. A failed
+            # version capture must not fall back to help to authorize quota.
+            cap.warnings.append(f"capability probe failed: {exc}")
+        else:
+            cap.version = _parse_version(version_text)
+            if cap.version is None:
+                cap.warnings.append("capability version probe returned no recognized version")
+
         if not cap.authenticated:
             cap.warnings.append(
                 f"Antigravity auth state not detected via {AGY_OAUTH_CREDS_PATH} "
@@ -402,21 +427,25 @@ class AgyPrintBackend(BaseAdapter):
         return cap
 
     @staticmethod
-    def _run_probe(cmd: list[str], *, timeout: int, extra: list[str] | None = None) -> str:
-        """Best-effort subprocess probe; returns combined stdout+stderr or empty string."""
-
+    def _run_probe(
+        cmd: list[str], *, timeout: int, extra: list[str] | None = None,
+        safety: SafetyPolicy | None = None,
+    ) -> str:
+        """Return bounded combined probe output, or explicitly fail detection."""
         try:
-            proc = subprocess.run(  # noqa: S603 - argv is hard-coded probe
-                cmd + (extra or []),
-                capture_output=True,
-                timeout=timeout,
-                env=_scrub_probe_env(),
-                check=False,
+            code, out, err = run_bounded_process(
+                cmd + (extra or []), env=_scrub_probe_env(safety), timeout=timeout,
+                max_output_bytes=MAX_PROBE_OUTPUT_BYTES,
             )
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        out = (proc.stdout or b"").decode("utf-8", errors="replace")
-        err = (proc.stderr or b"").decode("utf-8", errors="replace")
+        except Exception as exc:
+            raise _CapabilityProbeError("capability process execution failed") from exc
+        if code == INVALID_OUTPUT_EXIT:
+            raise _CapabilityProbeError(err)
+        if code is None or code < 0:
+            reason = "timed out" if code == -1 and err == "timeout" else "could not complete"
+            raise _CapabilityProbeError(f"capability process {reason}")
+        if code != 0:
+            raise _CapabilityProbeError(f"capability process exited with code {code}")
         return out + ("\n" + err if err else "")
 
     @staticmethod
@@ -1274,10 +1303,15 @@ def _parse_version_from_help(help_text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _scrub_probe_env() -> dict[str, str]:
-    """Environment used only for capability probes; secrets stripped."""
 
-    return scrub_env(dict(os.environ))
+def _scrub_probe_env(safety: SafetyPolicy | None = None) -> dict[str, str]:
+    """Use configured scrubbing for metadata children; omit operator-added secrets."""
+    policy = safety or SafetyPolicy()
+    env = policy.scrub_environment(dict(os.environ))
+    extra_names = {name.casefold() for name in policy.config.scrub_extra_env}
+    env = {name: value for name, value in env.items() if name.casefold() not in extra_names}
+    env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "1"
+    return env
 
 
 def detect_agy_auth_source(

@@ -119,12 +119,18 @@ completion. Evidence references may name absent or incomplete files.
 `validation="not_reported"` and `parent_acceptance="not_recorded"` are intentional:
 independently diff/check the artifact before accepting worker completion.
 
-Doctor health does not establish quota. `quota.availability="unknown"`, null
-remaining/reset/retry fields, and `source="not_probed"` disclose that no balance
-probe is implemented. Recognized resource-exhaustion errors project redacted
-`adapter.quota` / `record.extra.quota`, distinguishing literal quota, rate-limit,
-and ambiguous resource failures. This is not a meter; no automatic retry/model/
-backend substitution is added. Ask the quota owner before rerouting.
+Use `agy_quota(force_refresh=False)` for read-only Antigravity subscription
+snapshots (CLI >= 1.1.11), not `PROMPT="/quota"` through the inference tool.
+Preserve upstream shared groups and weekly/five-hour buckets; missing values
+are null, disabled buckets are not usable balances, and fractions are not request
+counts or availability guarantees. Successful snapshots have a 30-second memory
+cache; force refresh after account switches and inspect observation/cache age.
+Failed refreshes are explicit, not stale success. No private account contents
+are read to identify accounts; undetectable switches can remain cached for TTL.
+Doctor health still does not establish balances (`unknown` / `not_probed`).
+Error-derived `adapter.quota` / `record.extra.quota` remains separate, classifying
+literal quota, rate-limit, and ambiguous resource errors. No automatic retry,
+model/backend substitution is added. Ask the quota owner before rerouting.
 
 A worktree isolates checkout edits, not all filesystem access. Read-only modes
 are worker instructions, not OS write enforcement. `sandbox` requests upstream

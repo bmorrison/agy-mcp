@@ -7,7 +7,7 @@
 
 言語：[`简体中文`](../README.md) · [`繁體中文`](README_ZH-TW.md) · [`English`](README_EN.md)
 
-> Google **Antigravity CLI**（`agy`）を 12 個の typed MCP tool として
+> Google **Antigravity CLI**（`agy`）を 13 個の typed MCP tool として
 > ラップし、任意の MCP client（Claude Code / OpenAI Codex / Cursor /
 > Cline / Continue …）から直接呼び出せるようにします。任意で Skill
 > bundle も提供し、skill 対応プラットフォームに*いつ委譲するか*、
@@ -76,7 +76,7 @@ agy-mcp という open-source MCP をインストールしてください。具�
   現在の permission mode が acceptEdits を許している場合は、そのまま進める。
 
 各 step が終わるたびに 1 行で報告する。すべて終わったら 4 行でまとめる：
-どこにインストールされたか、12 個の MCP tool が公開されたか、SKILL の
+どこにインストールされたか、13 個の MCP tool が公開されたか、SKILL の
 配置先、残っている任意項目。
 ````
 
@@ -109,7 +109,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 呼び出せる collaboration agent backend にする wrapper です。2 つの
 同等な経路を提供します：
 
-- **MCP server**：`agymcp` が FastMCP stdio 経由で 12 個の typed JSON
+- **MCP server**：`agymcp` が FastMCP stdio 経由で 13 個の typed JSON
   tool を公開します。pydantic envelope は安定して解析できます。
   **任意の MCP client で利用可能**です。
 - **Skill bundles**：`~/.claude/skills/`、`~/.agents/skills/`、
@@ -124,7 +124,7 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 > あります。この project は CLI の wrap、routing、isolation、audit を
 > 行うだけで、`agy` API を再実装しません。
 
-## 12 個の MCP tool
+## 13 個の MCP tool
 
 | Tool | Purpose |
 |---|---|
@@ -138,8 +138,14 @@ Google の新しい Antigravity CLI（`agy`）を、任意の MCP client から
 | `agy_cancel` | cross-platform process-group cancel。`job_id` は一意な prefix でも可 |
 | `agy_sessions` | 最近の session を一覧 |
 | `agy_doctor` | env + auth + capability probe（secrets は出さない） |
+| `agy_quota` | Antigravity CLI `/quota` metadata を読み取り専用で取得（推論 turn なし）：upstream shared model group の weekly / 5 時間 window の残り fraction と reset timestamp（無効・欠損値は明示）、30 秒 in-memory cache、`force_refresh=True` で強制 refresh、model/backend fallback なし |
 | `agy_install_skill` | SKILL bundle を Claude / Codex / Antigravity dirs にインストール |
 | `agy_purge` | local session-store directories を掃除（`days <= 0` は拒否） |
+
+> 残り quota を知るには `agy_quota` を使用してください。推論 `agy` に
+> `PROMPT='/quota'` を通さないでください。Antigravity CLI `>= 1.1.11`
+> が必要です。スナップショットを報告するだけで利用可能を保証しません；
+> 無効化された bucket は使える quota ではありません。
 
 ## いつ使うか / いつ使わないか
 
