@@ -558,11 +558,13 @@ class QuotaProbe:
                 if _safety_config_signature(self.adapter.safety) != policy:
                     raise ValueError("quota and adapter safety policies are incompatible")
             auth_context = self._detect_auth_context()
-            cap = self.adapter.detect(
-                refresh=refresh
-                or self._binary_identity is None
-                or auth_context != self._auth_identity
-            )
+            refreshed = refresh or self._binary_identity is None or auth_context != self._auth_identity
+            before_identity = None
+            if refreshed and isinstance(self.adapter, AgyPrintBackend):
+                before_identity = self._binary_fingerprint(
+                    self.adapter.locate_binary(AGY_BINARY_NAME) or ""
+                )
+            cap = self.adapter.detect(refresh=refreshed)
             # BaseAdapter caches capabilities indefinitely. Re-detect before a
             # changed executable can inherit a supported predecessor's version.
             resolved = (
@@ -571,11 +573,20 @@ class QuotaProbe:
                 else cap.bin_path or ""
             )
             identity = self._binary_fingerprint(resolved)
+            if before_identity is not None and identity != before_identity:
+                raise ValueError("quota executable changed during capability detection")
             if resolved != cap.bin_path or (
-                self._binary_identity is not None and identity != self._binary_identity
+                not refreshed
+                and self._binary_identity is not None
+                and identity != self._binary_identity
             ):
+                # Only cached capabilities need a replacement-driven refresh.
+                # A forced/auth-driven refresh already inspected this executable.
+                probe_identity = identity
                 cap = self.adapter.detect(refresh=True)
                 identity = self._binary_fingerprint(cap.bin_path or "")
+                if identity != probe_identity:
+                    raise ValueError("quota executable changed during capability detection")
             self._binary_identity = identity
             self._auth_identity = auth_context
             return (

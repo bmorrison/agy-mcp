@@ -196,6 +196,18 @@ Progress evidence:
   passed in 35.37s**; lint, whitespace and fresh offline stdio smoke passed.
   Another current-head Codex review follows; original live/lab receipts remain
   unchanged and no deployment or merge is authorized.
+- Codex review round 5 reviewed `564ee45` and raised one P2: a forced refresh
+  after an in-place upgrade ran redundant detection and could combine newly
+  discovered auth with a stale unknown-evidence key. Parent reproduced the
+  duplicate and failed refresh; a non-forced replacement was a passing control.
+  Independent boundary checking also reproduced accepting a binary that rewrote
+  itself during version detection. Detection now distinguishes fresh from cached
+  capabilities, avoids the duplicate replacement refresh, and compares executable
+  fingerprints across actual metadata detection to reject mid-probe replacement.
+  Added four cases: **3 failed, 1 passed** before repair; **343 focused/frozen
+  passed in 20.58s; 952 full tests passed in 39.71s** afterward. Lint, whitespace
+  and fresh offline stdio smoke passed. Another current-head Codex review follows;
+  the original live/lab receipts and deployment/merge restrictions are unchanged.
 
 ## Goal
 
