@@ -146,7 +146,9 @@ A snapshot is not a guarantee of successful inference or a billing meter.
 Metadata uses its own adapter and per-loop eight-worker capacity, separate from
 doctor's cached capabilities and the long-running inference queue. Explicit doctor
 refresh/reset still invalidates the quota cache; metadata reads do not probe Gemini
-or launch inference/jobs.
+or launch inference/jobs. Transient or incomplete help/version detection is retried
+by the next normal read, without requiring force refresh. Existing waiters share
+the failed detection result rather than silently retrying within the same flight.
 
 Successful snapshots are cached in memory for 30 seconds, with `observed_at`,
 `cached`, and `age_seconds`. TTL/age start at observation rather than after

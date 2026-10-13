@@ -223,6 +223,19 @@ Progress evidence:
   27.34s; 957 full tests passed in 35.61s**; lint, whitespace and fresh offline
   stdio smoke passed. Another current-head Codex review follows without rewriting
   original live/lab receipts, changing deployment, or merging.
+- Codex review round 7 reviewed `6d3e07a` and found transient capability
+  failures remaining sticky on later normal reads. Reproduced help/version
+  timeout, overflow, invalid UTF-8 and nonzero exits, plus failed-flight
+  coalescing and missing print capability: **10 regressions initially failed**.
+  Incomplete detection now marks a new-flight retry requirement. Later normal
+  reads re-detect; the active flight and its existing waiters share failure
+  without hidden re-probes. Metadata also requires verified print capability,
+  represented in its private context key. A first test rerun exposed synthetic
+  Python startup exceeding the 0.1s test deadline; timeout cases now allow 0.5s
+  startup while retaining their intentional 60s hang and exact argv counts.
+  **451 focused/frozen passed in 30.51s; 967 full tests passed in 39.87s**;
+  lint, whitespace and fresh offline stdio smoke passed. Original live/lab
+  receipts and deployment/merge restrictions remain unchanged.
 
 ## Goal
 

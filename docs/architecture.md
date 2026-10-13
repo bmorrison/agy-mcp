@@ -65,7 +65,9 @@ others.
 `agy_quota(force_refresh=False)` takes a dedicated MCP → `QuotaProbe` → CLI
 path, bypassing inference prompt preparation, the supervisor, and worktrees.
 Metadata detection owns a separate adapter, so failed re-probes cannot overwrite
-doctor's cached capabilities. A separate per-loop eight-worker limiter keeps
+doctor's cached capabilities. It requires both a verified version and print
+capability. Incomplete detection is retried by a later normal read; an active
+flight and its existing waiters share failure without hidden re-probes. A separate per-loop eight-worker limiter keeps
 metadata/cache reads out of the long-running inference queue. Config/safety
 replacement and explicit doctor refresh/reset invalidate the metadata cache.
 It invokes the configured Antigravity binary with `--print=/quota

@@ -521,6 +521,7 @@ class QuotaProbe:
         self._generation = 0
         self._binary_identity: tuple[Any, ...] | None = None
         self._auth_identity: str | None = None
+        self._detection_incomplete = False
         self._cached_response: QuotaToolResponse | None = None
         self._cached_mono: float = 0.0
         self._cached_key: _CacheKey | None = None
@@ -589,12 +590,13 @@ class QuotaProbe:
                     raise ValueError("quota executable changed during capability detection")
             self._binary_identity = identity
             self._auth_identity = auth_context
+            self._detection_incomplete = cap.version is None or not cap.supports_print
             return (
                 cap.bin_path or "",
                 cap.version,
                 auth_context,
                 check_slash_commands_disabled(),
-                (identity, cap.authenticated, policy),
+                (identity, cap.authenticated, policy, cap.supports_print),
             )
         finally:
             self._detect_lock.release()
@@ -631,7 +633,13 @@ class QuotaProbe:
             and before[:2] == after[:2]
             and before[3] == after[3]
             and before[4][0] == after[4][0]
-            and before[4][2] == after[4][2]
+            and before[4][2:] == after[4][2:]
+        )
+
+    @staticmethod
+    def _incomplete_detection_failure(key: _CacheKey, response: QuotaToolResponse) -> bool:
+        return not response.success and (
+            key[1] is None or (len(key[4]) > 3 and not key[4][3])
         )
 
     def _failure(
@@ -671,7 +679,10 @@ class QuotaProbe:
                 return self._failure(
                     "timeout", "timed out waiting for in-flight quota probe", flight.key
                 )
-            if flight.key is not None:
+            if flight.key is not None and not (
+                flight.response is not None
+                and self._incomplete_detection_failure(flight.key, flight.response)
+            ):
                 try:
                     valid_key = self._get_cache_key()
                 except Exception:
@@ -711,7 +722,11 @@ class QuotaProbe:
         cache_hit = False
         try:
             try:
-                current_key = self._get_cache_key(refresh=force_refresh)
+                # Retry incomplete proof only when a later caller owns a new
+                # flight, not during this flight's validation or by its waiters.
+                current_key = self._get_cache_key(
+                    refresh=force_refresh or self._detection_incomplete
+                )
             except Exception as exc:
                 self.invalidate()
                 response = self._failure("unavailable", f"failed to determine cache key: {exc}")
@@ -743,7 +758,12 @@ class QuotaProbe:
                         # Match observed_at before post-command detection can
                         # delay publication; TTL must not restart after it.
                         flight.observed_mono = time.monotonic()
-                valid_key = self._get_cache_key()
+                if self._incomplete_detection_failure(current_key, response):
+                    # No metadata ran and no balance can be published. Share the
+                    # failure without a hidden retry; the next flight re-detects.
+                    valid_key = current_key
+                else:
+                    valid_key = self._get_cache_key()
         except Exception as exc:
             response = self._failure(
                 "unavailable", f"unexpected probe execution error: {exc}", current_key
@@ -824,6 +844,11 @@ class QuotaProbe:
                 backend="agy",
                 cli_version=self.safety.redact(version) if version else None,
                 source=QUOTA_SOURCE,
+            )
+
+        if len(current_key[4]) < 4 or not current_key[4][3]:
+            return self._failure(
+                "unsupported", "noninteractive print capability is unverified", current_key
             )
 
         # Auth capability is a local-evidence heuristic: missing/stale logs do
