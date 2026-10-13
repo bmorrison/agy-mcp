@@ -64,6 +64,10 @@ others.
 
 `agy_quota(force_refresh=False)` takes a dedicated MCP → `QuotaProbe` → CLI
 path, bypassing inference prompt preparation, the supervisor, and worktrees.
+Metadata detection owns a separate adapter, so failed re-probes cannot overwrite
+doctor's cached capabilities. A separate per-loop eight-worker limiter keeps
+metadata/cache reads out of the long-running inference queue. Config/safety
+replacement and explicit doctor refresh/reset invalidate the metadata cache.
 It invokes the configured Antigravity binary with `--print=/quota
 --output-format json --print-timeout 20s` only on supported CLI versions
 (>= 1.1.11). The successful envelope must establish zero inference turns/tokens

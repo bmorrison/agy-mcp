@@ -114,6 +114,8 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,96}$")
 # each instance is bound to the asyncio loop that created it — so we cache
 # per running loop id rather than process-globally (Phase 5 R3 arch P1).
 _BRIDGE_CONCURRENCY = 8
+# Metadata must not queue behind inference calls that can run for hours.
+_QUOTA_CONCURRENCY = 8
 # Phase 5 R3 P3.14: keyed on the running loop object itself via
 # WeakKeyDictionary so a GC'd loop drops its limiter automatically.
 # (The previous ``dict[int, ...]`` keyed on ``id(loop)`` was correct
@@ -123,6 +125,9 @@ _bridge_limiters_by_loop: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, anyio.CapacityLimiter
 ] = weakref.WeakKeyDictionary()
 _bridge_limiter_lock = threading.Lock()
+_quota_limiters_by_loop: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, anyio.CapacityLimiter
+] = weakref.WeakKeyDictionary()
 
 # Defence-in-depth cap on the install-skill argument surface
 # (Phase 5 R2 security P1-1). 16 is well above the four documented
@@ -208,15 +213,26 @@ async def _get_bridge_limiter() -> anyio.CapacityLimiter:
         return limiter
 
 
+async def _get_quota_limiter() -> anyio.CapacityLimiter:
+    """Independent per-loop metadata capacity, never borrowed by inference."""
+    loop = asyncio.get_running_loop()
+    with _bridge_limiter_lock:
+        limiter = _quota_limiters_by_loop.get(loop)
+        if limiter is None:
+            limiter = anyio.CapacityLimiter(_QUOTA_CONCURRENCY)
+            _quota_limiters_by_loop[loop] = limiter
+        return limiter
+
+
 def _reset_state_for_tests() -> None:
     """Drop the cached singletons so tests can swap in fresh stores.
 
     Holds ``_state_lock`` and ``_bridge_limiter_lock`` while wiping.
     **Invariant for future maintainers:** callbacks invoked while
     those locks are held MUST NOT call back into ``_ensure_state``
-    / ``_ensure_adapters`` / ``_get_bridge_limiter``, or the test
-    teardown will deadlock. The current implementation only mutates
-    module-level globals — keep it that way (Phase 5 R2 P3.7).
+    / ``_ensure_adapters`` / either limiter accessor, or the test
+    teardown will deadlock. Quota invalidation must remain an in-memory
+    cache/generation operation with no state or limiter callbacks (Phase 5 R2 P3.7).
     """
 
     global _config, _safety, _store, _supervisor, _agy_adapter, _gemini_adapter, _quota_probe
@@ -227,9 +243,12 @@ def _reset_state_for_tests() -> None:
         _supervisor = None
         _agy_adapter = None
         _gemini_adapter = None
+        if _quota_probe is not None:
+            _quota_probe.invalidate()
         _quota_probe = None
     with _bridge_limiter_lock:
         _bridge_limiters_by_loop.clear()
+        _quota_limiters_by_loop.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -973,20 +992,22 @@ def agy_doctor_tool(force_refresh: bool = False) -> DoctorToolResponse:
 
 def _get_quota_snapshot(force_refresh: bool) -> QuotaToolResponse:
     """Initialize and probe entirely in a bounded worker, never the event loop."""
-    global _agy_adapter, _quota_probe
+    global _quota_probe
     safety = _safety or SafetyPolicy()
     try:
         config, safety, _store_, _supervisor_ = _ensure_state()
         with _state_lock:
-            if _agy_adapter is None:
-                _agy_adapter = AgyPrintBackend(
-                    bin_override=config.backend.agy_bin, safety=safety,
-                )
-            # Share doctor's actual adapter, not the inference routing factory.
-            if _quota_probe is None or _quota_probe.adapter is not _agy_adapter:
+            if (
+                _quota_probe is None
+                or _quota_probe.adapter.bin_override != config.backend.agy_bin
+                or _quota_probe.adapter.safety is not safety
+            ):
                 if _quota_probe is not None:
                     _quota_probe.invalidate()
-                _quota_probe = QuotaProbe(adapter=_agy_adapter, safety=safety)
+                # Metadata detection owns its adapter. A failed re-probe must
+                # not overwrite doctor's cached capabilities or routing state.
+                adapter = AgyPrintBackend(bin_override=config.backend.agy_bin, safety=safety)
+                _quota_probe = QuotaProbe(adapter=adapter, safety=safety)
             probe = _quota_probe
         return probe.get(force_refresh=force_refresh)
     except Exception as exc:  # noqa: BLE001 - includes initialization failures
@@ -1008,7 +1029,7 @@ def _get_quota_snapshot(force_refresh: bool) -> QuotaToolResponse:
     ),
 )
 async def agy_quota_tool(force_refresh: bool = False) -> QuotaToolResponse:
-    limiter = await _get_bridge_limiter()
+    limiter = await _get_quota_limiter()
     return await anyio.to_thread.run_sync(
         _get_quota_snapshot, force_refresh, limiter=limiter,
     )

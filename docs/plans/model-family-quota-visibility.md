@@ -208,6 +208,21 @@ Progress evidence:
   passed in 20.58s; 952 full tests passed in 39.71s** afterward. Lint, whitespace
   and fresh offline stdio smoke passed. Another current-head Codex review follows;
   the original live/lab receipts and deployment/merge restrictions are unchanged.
+- Codex review round 6 reviewed `8e6fe0a` and raised two server-level P2s:
+  shared adapter mutation and metadata starvation behind inference capacity.
+  The claimed persistent ordinary-inference outage did not reproduce: canonical
+  routing constructs fresh adapters. Confirmed defects were poisoning doctor's
+  cached capabilities and preventing even cached metadata workers from starting
+  while all eight inference slots were held. A separate boundary test reproduced
+  reset allowing an old in-flight result to publish. Initial gate: **4 failed,
+  1 passed**, including the passing ordinary-routing control. Metadata now owns
+  a separate configured adapter and independent per-loop eight-worker capacity.
+  Config/safety changes and explicit doctor refresh/reset invalidate its cache;
+  reset also invalidates in-flight publication. Updated lifecycle/limiter tests
+  and the fake probe's invalidation interface. **441 focused/frozen passed in
+  27.34s; 957 full tests passed in 35.61s**; lint, whitespace and fresh offline
+  stdio smoke passed. Another current-head Codex review follows without rewriting
+  original live/lab receipts, changing deployment, or merging.
 
 ## Goal
 

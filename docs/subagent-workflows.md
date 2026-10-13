@@ -143,6 +143,11 @@ Observed Gemini Flash/Pro share one group and Claude/GPT share another; do not
 invent separate balances for each family or turn fractions into request counts.
 A snapshot is not a guarantee of successful inference or a billing meter.
 
+Metadata uses its own adapter and per-loop eight-worker capacity, separate from
+doctor's cached capabilities and the long-running inference queue. Explicit doctor
+refresh/reset still invalidates the quota cache; metadata reads do not probe Gemini
+or launch inference/jobs.
+
 Successful snapshots are cached in memory for 30 seconds, with `observed_at`,
 `cached`, and `age_seconds`. TTL/age start at observation rather than after
 post-command validation; even an uncached result can have a nonzero age.

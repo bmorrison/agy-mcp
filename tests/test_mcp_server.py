@@ -1694,10 +1694,14 @@ def test_agy_quota_forwarding_configured_adapter_and_lazy_singleton(reset_state,
             assert adapter.bin_override == "/configured/antigravity"
             assert safety is reset_state.safety
             instances.append(self)
+            self.invalidated = False
 
         def get(self, force_refresh=False):
             calls.append(force_refresh)
             return QuotaToolResponse(success=True)
+
+        def invalidate(self):
+            self.invalidated = True
 
     monkeypatch.setattr(server, "QuotaProbe", Probe)
     monkeypatch.setattr(server, "GeminiCliBackend", lambda **kw: pytest.fail("Gemini initialized"))
@@ -1711,6 +1715,7 @@ def test_agy_quota_forwarding_configured_adapter_and_lazy_singleton(reset_state,
     assert len(instances) == 1
     assert server._gemini_adapter is None
     server._reset_state_for_tests()
+    assert instances[0].invalidated
     assert server._quota_probe is None
     assert server._agy_adapter is None
 
@@ -1729,13 +1734,16 @@ def _stage_quota_cache(monkeypatch):
     return calls
 
 
-def test_agy_quota_cache_adapter_replacement_and_doctor_refresh(reset_state, monkeypatch):
+def test_agy_quota_cache_config_replacement_and_doctor_refresh(reset_state, monkeypatch):
     calls = _stage_quota_cache(monkeypatch)
     first = _run_async(server.agy_quota_tool())
     assert first.success and not first.cached
     assert _run_async(server.agy_quota_tool()).cached
     old = server._quota_probe
     server._agy_adapter = server.AgyPrintBackend(safety=reset_state.safety)
+    assert _run_async(server.agy_quota_tool()).cached
+    assert server._quota_probe is old  # Doctor replacement is metadata-independent.
+    reset_state.config.backend.agy_bin = "/fake/reconfigured-agy"
     assert not _run_async(server.agy_quota_tool()).cached
     assert server._quota_probe is not old
     assert old._cached_response is None
@@ -1885,7 +1893,7 @@ def test_agy_quota_reset_discards_cached_snapshot(reset_state, monkeypatch):
 
 
 def test_agy_quota_uses_per_loop_bounded_limiter(reset_state, monkeypatch):
-    monkeypatch.setattr(server, "_BRIDGE_CONCURRENCY", 2)
+    monkeypatch.setattr(server, "_QUOTA_CONCURRENCY", 2)
     active = 0
     maximum = 0
     lock = threading.Lock()
@@ -1905,8 +1913,9 @@ def test_agy_quota_uses_per_loop_bounded_limiter(reset_state, monkeypatch):
     monkeypatch.setattr(server, "_get_quota_snapshot", snapshot)
 
     async def check():
-        limiter = await server._get_bridge_limiter()
+        limiter = await server._get_quota_limiter()
         assert limiter.total_tokens == 2
+        assert limiter is not await server._get_bridge_limiter()
         responses = await asyncio.gather(*(server.agy_quota_tool() for _ in range(6)))
         assert all(response.success for response in responses)
         assert limiter.borrowed_tokens == 0
@@ -1925,3 +1934,95 @@ def test_agy_doctor_keeps_quota_not_probed_after_quota_tool(reset_state, monkeyp
         assert response.report["quota"]["source"] == "not_probed"
         assert response.report["quota"]["remaining_quota"] is None
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failure", ["timed out", "output exceeds maximum size"])
+def test_quota_reprobe_does_not_poison_doctor_capabilities(reset_state, monkeypatch, tmp_path, failure):
+    from agy_mcp.adapters.agy import _CapabilityProbeError
+
+    reset_state.config.backend.agy_bin = str(_make_fake_agy_wrapper(tmp_path))
+    doctor, _ = server._ensure_adapters()
+    good = Capability(
+        bin_path=reset_state.config.backend.agy_bin, backend="agy", version="1.3.3",
+        authenticated=True, supports_print=True,
+    )
+    doctor._capability = good
+
+    def fail(*args, **kwargs):
+        raise _CapabilityProbeError(failure)
+
+    with monkeypatch.context() as transient:
+        transient.setattr(server.AgyPrintBackend, "_run_probe", staticmethod(fail))
+        assert not _run_async(server.agy_quota_tool(force_refresh=True)).success
+    assert doctor.detect() is good
+    assert doctor.detect().supports_print
+    assert server._quota_probe.adapter is not doctor
+
+
+def test_ordinary_inference_routing_builds_fresh_adapter_not_doctor(reset_state, monkeypatch, tmp_path):
+    from agy_mcp.adapters import agy
+    from agy_mcp.routing import build_adapter
+
+    binary = _make_fake_agy_wrapper(tmp_path)
+    reset_state.config.backend.agy_bin = str(binary)
+    monkeypatch.setattr(agy, "detect_agy_auth_source", lambda: None)
+    monkeypatch.setattr(agy, "detect_agy_account_issue", lambda: None)
+    monkeypatch.setattr(agy.AgyPrintBackend, "_discover_model", staticmethod(lambda: None))
+    doctor, _ = server._ensure_adapters()
+    doctor._capability = Capability(bin_path=str(binary), backend="agy", supports_print=False)
+    ordinary = build_adapter("agy", reset_state.config, reset_state.safety)
+    assert ordinary is not doctor
+    assert ordinary.detect().supports_print
+    # Construction only: no inference execution.
+    argv = ordinary.build_command(BridgeRequest(prompt="synthetic", backend="agy"), log_path=None)
+    assert any(arg.startswith("--print=") for arg in argv)
+
+
+def test_cached_quota_can_start_while_all_inference_slots_are_occupied(reset_state, monkeypatch):
+    monkeypatch.setattr(
+        server, "_get_quota_snapshot", lambda force: QuotaToolResponse(success=True, cached=True)
+    )
+
+    async def check():
+        bridge = await server._get_bridge_limiter()
+        borrowers = [object() for _ in range(bridge.total_tokens)]
+        try:
+            for borrower in borrowers:
+                await bridge.acquire_on_behalf_of(borrower)
+            response = await asyncio.wait_for(server.agy_quota_tool(), timeout=0.5)
+            assert response.success and response.cached
+            assert bridge.borrowed_tokens == bridge.total_tokens
+        finally:
+            for borrower in borrowers:
+                bridge.release_on_behalf_of(borrower)
+
+    _run_async(check())
+
+
+def test_reset_invalidates_in_flight_quota_publication(reset_state, monkeypatch):
+    _stage_quota_cache(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+
+    def run(*args):
+        entered.set()
+        assert release.wait(3)
+        return QuotaToolResponse(success=True)
+
+    monkeypatch.setattr(server.QuotaProbe, "_run_probe", run)
+
+    async def check():
+        task = asyncio.create_task(server.agy_quota_tool())
+        try:
+            deadline = time.monotonic() + 2
+            while not entered.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.005)
+            assert entered.is_set()
+            old = server._quota_probe
+            server._reset_state_for_tests()
+        finally:
+            release.set()
+        response = await task
+        assert not response.success and response.status == "unavailable"
+        assert old._cached_response is None
+
+    _run_async(check())
