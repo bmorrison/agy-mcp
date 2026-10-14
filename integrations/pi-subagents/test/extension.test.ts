@@ -24,6 +24,16 @@ test("control-tool.ts strict action-specific TypeBox/output schema, fixed failur
   const unknown = await tool.execute("id", { action: "status", runId: "native-other" }, undefined, undefined, context()); assert.equal(unknown.isError, true); assert.equal(Check(ControlOutput, unknown.structuredContent), true);
 });
 
+test("PR5 platform: unsupported extension host rejects before tool/event/provider registration", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!; let registrations = 0;
+  const pi = { on: () => registrations++, registerTool: () => registrations++ } as unknown as ExtensionAPI;
+  try {
+    Object.defineProperty(process, "platform", { ...descriptor, value: "win32" });
+    assert.throws(() => extension(pi), /unsupported_platform/);
+    assert.equal(registrations, 0); assert.equal(getExternalJobProvider("agy-mcp"), undefined);
+  } finally { Object.defineProperty(process, "platform", descriptor); }
+});
+
 test("index.ts lazy factory/session declaration; exact collision and owned idempotent replacement/shutdown", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agy-pi-extension-")); const oldRoot = process.env.AGY_PI_STATE_ROOT; process.env.AGY_PI_STATE_ROOT = path.join(root, "state");
   t.after(async () => { if (oldRoot === undefined) delete process.env.AGY_PI_STATE_ROOT; else process.env.AGY_PI_STATE_ROOT = oldRoot; await fs.rm(root, { recursive: true, force: true }); });

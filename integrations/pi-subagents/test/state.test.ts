@@ -43,6 +43,41 @@ function writeManifest(store: AssignmentStore, m: unknown) { fs.writeFileSync(pa
 function lease(store: AssignmentStore, turn: TurnRecord): string { return path.join(store.ownerDirectory, `${turn.assignmentId}.lease`); }
 function receipts(store: AssignmentStore, scope: ProviderDeadline, id: string) { return store.getQueueReceipts(id, scope).map(r => r.state); }
 
+test("PR5 platform: unsupported hosts reject before state filesystem access", t => {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const mkdir = t.mock.method(fs, "mkdirSync", () => { throw new Error("unexpected filesystem access"); });
+  try {
+    for (const platform of ["win32", "freebsd", "aix"]) {
+      Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+      assert.throws(() => new AssignmentStore("/unused-private-state", OWNER, null), /unsupported_platform/);
+    }
+    assert.equal(mkdir.mock.callCount(), 0);
+  } finally { Object.defineProperty(process, "platform", descriptor); }
+});
+
+test("PR5 validation: each referenced turn is validated once per manifest read; later corruption is not cached", t => {
+  const { store, scope } = fixture(t); const first = terminal(store, scope, start(store, scope));
+  for (let i = 0; i < 16; i++) store.enqueueMessage(first.jobId, `receipt-${i}`, "private guidance", scope);
+  const second = terminal(store, scope, follow(store, scope, first));
+  const files = new Set(manifest(store).assignments[0].turns.map((ref: { file: string }) => path.join(store.ownerDirectory, ref.file)));
+  const open = fs.openSync; let reads = 0;
+  t.mock.method(fs, "openSync", (...args: Parameters<typeof open>) => {
+    if (files.has(String(args[0]))) reads++;
+    return open(...args);
+  });
+  assert.equal(store.getTurn(second.jobId, scope).jobId, second.jobId);
+  // Two manifest loads + their parent read, then requested load + parent read.
+  // Receipt-to-snapshot checks must reuse validated records, not reread16times.
+  assert.equal(reads, 5);
+  const file = manifest(store).assignments[0].turns[1].file;
+  const target = path.join(store.ownerDirectory, file); const bytes = fs.readFileSync(target, "utf8");
+  const corrupt = JSON.parse(bytes); corrupt.config.model = "changed-frozen-model";
+  fs.writeFileSync(target, JSON.stringify(corrupt), { mode: 0o600 });
+  assert.throws(() => store.getTurn(second.jobId, scope), /state_turn_invalid/);
+  fs.writeFileSync(target, bytes, { mode: 0o600 }); fs.unlinkSync(target);
+  assert.throws(() => store.getTurn(second.jobId, scope), /state_unreadable/);
+});
+
 test("state.ts lazy private creation, frozen records, bodyless observations, no raw task/env retention", t => {
   const { store, scope, root } = fixture(t); assert.equal(fs.existsSync(root), false);
   const turn = start(store, scope); assert.equal(turn.jobId.length, 39);

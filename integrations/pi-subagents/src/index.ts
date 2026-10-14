@@ -5,9 +5,10 @@ import { fail } from "./contracts.js";
 import { AgyMcpClient } from "./mcp-client.js";
 import { createAgyProvider, type AgyProvider } from "./provider.js";
 import { createControlTool } from "./control-tool.js";
-import { AssignmentStore } from "./state.js";
+import { AssignmentStore, assertSupportedPlatform } from "./state.js";
 
 export default function agySubagents(pi: ExtensionAPI): void {
+  assertSupportedPlatform();
   let lifetime: { provider: AgyProvider; dispose: () => void; shutdown?: Promise<void> } | undefined;
   let replacement = Promise.resolve();
   const shutdown = (): Promise<void> => {

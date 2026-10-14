@@ -105,6 +105,11 @@ function patchOf(t: TurnRecord): TurnPatch {
 }
 function bodyless(r: RetainedReceipt): QueueReceipt { return { sequence: r.sequence, messageId: r.messageId, contentDigest: r.contentDigest, state: r.state }; }
 
+/** State durability/privacy rely on POSIX semantics; no weaker platform fallback. */
+export function assertSupportedPlatform(): void {
+  if (process.platform !== "linux" && process.platform !== "darwin") fail("unsupported_platform");
+}
+
 export class AssignmentStore {
   readonly ownerDirectory: string;
   private readonly nonce = randomUUID();
@@ -113,6 +118,7 @@ export class AssignmentStore {
   private readonly localIntents = new Set<string>();
   private readonly ownedLeases = new Map<string, LeaseAcquisition>();
   constructor(readonly root: string, readonly ownerSessionId: string, readonly ownerSessionFile: string | null) {
+    assertSupportedPlatform();
     if (!path.isAbsolute(root) || !UUID.test(ownerSessionId)) fail("invalid_owner_identity");
     if (ownerSessionFile !== null) { identity(ownerSessionFile); if (!path.isAbsolute(ownerSessionFile)) fail("invalid_owner_identity"); }
     this.ownerDirectory = path.join(root, ownerSessionId);
@@ -172,10 +178,14 @@ export class AssignmentStore {
     }
     // Missing/corrupt referenced versions are not reconstructed from backend history.
     for (const a of m.assignments) {
-      for (const ref of a.turns) this.load(m, ref.jobId);
+      // Only this manifest validation pass: every immutable version still loads
+      // and validates, but receipts sharing a snapshot reuse its validated row.
+      // Never retain these records across lock entries, publication or views.
+      const turns = new Map<string, TurnRecord>();
+      for (const ref of a.turns) turns.set(ref.jobId, this.load(m, ref.jobId));
       for (const r of a.receipts) if (r.snapshotJobId !== null) {
-        const t = this.load(m, r.snapshotJobId);
-        if (!t.queueSnapshot.some(q => q.messageId === r.messageId && q.sequence === r.sequence && q.contentDigest === r.contentDigest) || r.state === "not_delivered" && !["claimed", "dispatching"].includes(t.phase) || r.state === "forwarded" && t.phase === "claimed") fail("state_receipt_invalid");
+        const t = turns.get(r.snapshotJobId);
+        if (!t || !t.queueSnapshot.some(q => q.messageId === r.messageId && q.sequence === r.sequence && q.contentDigest === r.contentDigest) || r.state === "not_delivered" && !["claimed", "dispatching"].includes(t.phase) || r.state === "forwarded" && t.phase === "claimed") fail("state_receipt_invalid");
       }
     }
     return m;

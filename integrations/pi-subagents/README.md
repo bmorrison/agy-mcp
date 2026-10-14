@@ -13,6 +13,11 @@ upstream trial and operator acceptance.
 
 ## Prerequisites and operator setup
 
+- **Linux or macOS only**, with a filesystem supporting POSIX private modes,
+  no-follow opens, atomic rename and directory sync. Windows and other platforms
+  reject with `unsupported_platform` before tool/provider registration or state
+  access; there is no less-private durability fallback. This restriction applies
+  to this optional adapter, not the Python agy-mcp package.
 - Node **>=22.19**, a Pi **1.2.0-compatible** host and its `pi-ai`/`typebox` peers.
 - Load one trusted, **Chord-compatible corrected pi-subagents owner** with the
   inspected external-job/follow-up API. Uncorrected published `0.77.0` alone is
