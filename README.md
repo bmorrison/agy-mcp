@@ -184,6 +184,10 @@ MCP 工具是否齐、SKILL 落地路径、剩余可选项。
 | [`docs/release.md`](docs/release.md) | PyPI trusted publishing + GitHub Release 发布手册（一次性设置 + 常规流程） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录（Keep a Changelog） |
 
+可选 [Pi checkpoint 适配器](integrations/pi-subagents/README.md) 是独立 Node 客户端，
+不改变 Python MCP 工具或依赖。离线验证已通过，但完整包/发布验证与真实 AGY 就绪验证仍待完成。
+每个 Pi run 只完成一个 checkpoint turn；question/progress/blocked 不代表任务完成，父级验收另计。
+
 ## 开发
 
 ```bash

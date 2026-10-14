@@ -957,8 +957,9 @@ def test_run_unsafe_dry_run_does_not_call_run(monkeypatch, tmp_path: Path):
     assert fake.run_calls == []
 
 
-def test_run_unsafe_dry_run_redacts_adapter_bin_path(monkeypatch, tmp_path: Path):
-    raw_bin_path = str(Path.home() / ".local" / "bin" / "agy")
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
+def test_run_unsafe_dry_run_redacts_adapter_bin_path(monkeypatch, tmp_path: Path, native_home: str):
+    raw_bin_path = f"{native_home}/.local/bin/agy"
     cap = _capability("agy", bin_path=raw_bin_path)
     fake = _FakeAdapter(
         capability=cap,
@@ -1192,8 +1193,9 @@ def test_run_unsafe_no_backend_short_circuits(monkeypatch, tmp_path: Path):
     assert any("agy missing" in w for w in resp.warnings)
 
 
-def test_run_unsafe_agy_unauthenticated_short_circuits(monkeypatch, tmp_path: Path):
-    raw_home_path = str(Path.home() / ".gemini" / "oauth_creds.json")
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
+def test_run_unsafe_agy_unauthenticated_short_circuits(monkeypatch, tmp_path: Path, native_home: str):
+    raw_home_path = f"{native_home}/.gemini/oauth_creds.json"
     cap = _capability(
         "agy",
         authenticated=False,
@@ -1210,13 +1212,14 @@ def test_run_unsafe_agy_unauthenticated_short_circuits(monkeypatch, tmp_path: Pa
     assert fake.run_calls == []
 
 
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
 def test_run_unsafe_adapter_run_raises_returns_structured_envelope(
-    monkeypatch, tmp_path: Path,
+    monkeypatch, tmp_path: Path, native_home: str,
 ):
     """Phase 3 R1 / P1.1: an exception escaping adapter.run() must be
     translated into a BridgeResponse so warnings + adapter metadata survive."""
 
-    raw_bin_path = str(Path.home() / ".local" / "bin" / "agy")
+    raw_bin_path = f"{native_home}/.local/bin/agy"
     cap = _capability("agy", bin_path=raw_bin_path)
     fake = _FakeAdapter(capability=cap, run_result=_result())
 
@@ -1262,8 +1265,9 @@ def test_run_unsafe_warnings_field_is_populated_on_success(
     assert "a capability warning" in resp.warnings
 
 
-def test_run_unsafe_redacts_success_warnings(monkeypatch, tmp_path: Path):
-    raw_home_path = str(Path.home() / ".local" / "bin" / "agy")
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
+def test_run_unsafe_redacts_success_warnings(monkeypatch, tmp_path: Path, native_home: str):
+    raw_home_path = f"{native_home}/.local/bin/agy"
     cap = _capability("agy", warnings=[f"resolved binary at {raw_home_path}"])
     fake = _FakeAdapter(
         capability=cap,

@@ -128,6 +128,8 @@ exclude = [
     "**/Thumbs.db",
     # Defence-in-depth: even if a glob above expanded too widely, hatch
     # walks excludes last so anything matching here is dropped.
+    # Root-anchored: basename includes also match nested Node dependency docs.
+    "/integrations/",
     ".gitignore",
     ".python-version",
     "CLAUDE.md",

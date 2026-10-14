@@ -231,10 +231,11 @@ def test_agy_dry_run_returns_command_preview(reset_state, tmp_path: Path):
     assert out["command_preview"] is not None
 
 
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
 def test_mcp_call_tool_redacts_adapter_bin_path_in_structured_content(
-    reset_state, monkeypatch, tmp_path: Path,
+    reset_state, monkeypatch, tmp_path: Path, native_home: str,
 ):
-    raw_bin_path = str(Path.home() / ".local" / "bin" / "agy")
+    raw_bin_path = f"{native_home}/.local/bin/agy"
 
     def _fake_bridge_run(request, config, safety):
         redacted_bin_path = safety.redact(raw_bin_path)
@@ -1633,8 +1634,13 @@ def test_all_tool_output_models_round_trip_json(reset_state):
 
 async def test_agy_continue_empty_output_fails(reset_state, monkeypatch, tmp_path):
     """Continuing an agy session where output is empty fails with incomplete_response."""
-    from agy_mcp.adapters.agy import AgyPrintBackend
+    from agy_mcp.adapters.agy import AgyAuthSource, AgyPrintBackend
 
+    # Only the fake CLI is authenticated; never depend on ambient credentials
+    # or create an OAuth file to reach the empty-response execution path.
+    auth_hint = AgyAuthSource(kind="test-fixture", path=tmp_path / "unused-auth-marker")
+    monkeypatch.setattr("agy_mcp.adapters.agy.detect_agy_auth_source", lambda: auth_hint)
+    assert not auth_hint.path.exists()
     wrapper = _make_fake_agy_wrapper(tmp_path)
     monkeypatch.setenv("AGY_TEST_REPLY", "")
     monkeypatch.setattr(
@@ -1650,6 +1656,7 @@ async def test_agy_continue_empty_output_fails(reset_state, monkeypatch, tmp_pat
     assert resp.success is False
     assert resp.status == "failed"
     assert "empty output" in (resp.error or "")
+    assert not auth_hint.path.exists()
 
 
 def test_tool_docstrings_describe_runtime_semantics(reset_state):

@@ -258,6 +258,21 @@ metadata tools use their own typed failure envelopes (`QuotaToolResponse` for
 `SafetyPolicy.redact` so paths and tokens are anonymised before they
 land in the caller's transcript.
 
+## Optional Pi client layer
+
+`integrations/pi-subagents/` is a separate optional Node/Pi package. Its public
+`agy-mcp` external-job provider uses an adapter-owned lazy stdio connection to
+this unchanged Python server; `agy-reviewer` has advisory read-only intent, not
+an OS write sandbox. Pi-subagents owns native runs/notices; Python still owns
+execution, safety/redaction and observed AGY conversation evidence. Native turn
+completion is separate from checkpoint assignment state and parent acceptance.
+Explicit resume retains exact lineage; queued guidance does not launch/wake.
+Native stop/MCP close do not prove upstream cancellation. No intermediary LLM,
+new Python MCP tool/dependency or wheel/sdist payload is added. See the
+[adapter README](../integrations/pi-subagents/README.md) for host-mode, deadline,
+private-state, corrected-owner provenance and remaining acceptance boundaries.
+Whole-package/release acceptance and live AGY readiness remain pending.
+
 ## Related docs
 
 - `docs/installation.md` — how to install and register.

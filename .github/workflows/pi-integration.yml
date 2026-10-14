@@ -1,0 +1,98 @@
+name: Optional Pi integration
+
+on:
+  push:
+    branches: [main]
+    paths: &integration-paths
+      - 'integrations/pi-subagents/**'
+      - 'tests/test_pi_integration_boundary.py'
+      - 'src/agy_mcp/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/pi-integration.yml'
+      - 'README.md'
+      - 'docs/README_EN.md'
+      - 'docs/architecture.md'
+      - 'docs/subagent-workflows.md'
+  pull_request:
+    paths: *integration-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: offline Pi (Node 22, Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: integrations/pi-subagents/package-lock.json
+      - name: Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - name: uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - name: Provision disposable locked Python dev environment
+        run: |
+          uv sync --frozen --group dev --python 3.11
+          echo "AGY_PI_TEST_PYTHON=$(uv run --python 3.11 --no-sync python -c 'import sys; assert sys.version_info[:2] == (3, 11); print(sys.executable)')" >> "$GITHUB_ENV"
+      - name: Provision optional package only (no lifecycle scripts)
+        working-directory: integrations/pi-subagents
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck
+        working-directory: integrations/pi-subagents
+        run: npm run typecheck
+      - name: Verify captured corrected owner and audit production payload
+        working-directory: integrations/pi-subagents
+        # The checked-in archive is the immutable acquisition source, not the
+        # obsolete published owner installed by npm ci. Its helper validates
+        # SHA-256/member safety/module hashes/public-library equality before use.
+        run: node --import tsx --test test/packaging.test.ts
+      - name: All offline tests in complementary bounded partitions
+        env:
+          AGY_PI_TEST_NATIVE_EVIDENCE_ROOT: ${{ runner.temp }}/agy-pi-native-evidence
+        working-directory: integrations/pi-subagents
+        # No model/AGY/doctor/quota calls. Inner test/provider/native budgets
+        # remain unchanged; 235 seconds is only the outer partition guard.
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          files = sorted(str(p) for p in Path('test').glob('*.test.ts'))
+          native = 'test/pi-subagents-integration.test.ts'
+          provider = 'test/provider.test.ts'
+          assert native in files and provider in files
+          partitions = [
+              [p for p in files if p not in (native, provider)],
+              [provider],
+              ['--test-name-pattern=^Gate C REAL corrected owner ', native],
+              ['--test-name-pattern=^Gate C REAL owner ', native],
+          ]
+          for arguments in partitions:
+              print('Offline partition:', arguments, flush=True)
+              subprocess.run(['node', '--import', 'tsx', '--test', *arguments],
+                             check=True, timeout=235)
+          PY
+      - name: Python optional-client boundary and fixture lint
+        run: |
+          uv run --python 3.11 --no-sync pytest -q tests/test_pi_integration_boundary.py
+          uv run --python 3.11 --no-sync ruff check tests/test_pi_integration_boundary.py integrations/pi-subagents/test/support/python-mcp-server.py
+      - name: Lockfiles and protected Python contract unchanged by setup/tests
+        run: git diff --exit-code -- pyproject.toml uv.lock integrations/pi-subagents/package.json integrations/pi-subagents/package-lock.json src/agy_mcp
