@@ -77,13 +77,16 @@ jobs:
           import subprocess
           files = sorted(str(p) for p in Path('test').glob('*.test.ts'))
           native = 'test/pi-subagents-integration.test.ts'
-          assert native in files
+          provider = 'test/provider.test.ts'
+          assert native in files and provider in files
           partitions = [
-              [p for p in files if p != native],
+              [p for p in files if p not in (native, provider)],
+              [provider],
               ['--test-name-pattern=^Gate C REAL corrected owner ', native],
               ['--test-name-pattern=^Gate C REAL owner ', native],
           ]
           for arguments in partitions:
+              print('Offline partition:', arguments, flush=True)
               subprocess.run(['node', '--import', 'tsx', '--test', *arguments],
                              check=True, timeout=235)
           PY
