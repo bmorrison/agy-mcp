@@ -439,6 +439,34 @@ test("MCP standalone close uses bounded SDK-only child cleanup even when fixture
   }, true);
 });
 
+test("PR5 close callback: SDK composition preserves adapter ownership invalidation and pending RPC rejection", { timeout: 15_000 }, async () => {
+  let stdio!: StdioClientTransport;
+  await fixture("holdResult", async (client, root, requests) => {
+    await withProviderDeadline(scope => client.startTurn({ jobId: id, prompt: "owned", cwd: root, config }, scope));
+    assert.equal(client.ownership(id)!.live, true);
+    const scope = new ProviderDeadline();
+    try {
+      const pending = client.result(id, scope);
+      const rejected = assert.rejects(pending, /mcp_request_failed|mcp_connection_unavailable/);
+      await boundary(root, "result");
+      // Close only the public stdio transport, NOT AgyMcpClient.close().
+      await stdio.close(); await rejected;
+      await eventually(async () => client.lifecycle().pendingOperations === 0);
+      assert.equal(client.lifecycle().closed, false);
+      assert.equal(client.lifecycle().broken, true);
+      assert.equal(client.lifecycle().connected, false);
+      assert.equal(client.lifecycle().transportCloseObserved, true);
+      assert.equal(client.ownership(id)!.live, false);
+      const before = (await requests()).length;
+      await assert.rejects(client.connect(scope), /mcp_connection_unavailable/);
+      await assert.rejects(client.status(id, scope), /mcp_connection_unavailable/);
+      await assert.rejects(client.cancel(id), /mcp_connection_unavailable/);
+      assert.equal((await requests()).length, before);
+      assert.equal(starts(await requests()), 1);
+    } finally { scope.dispose(); }
+  }, true, { createStdioTransport: parameters => (stdio = new StdioClientTransport(parameters)) });
+});
+
 test("MCP resultOwned works after stop only on decoded live ownership under <=10s original window", async () => {
   await fixture("normal", async (client, root, requests) => {
     await withProviderDeadline(scope => client.startTurn({ jobId: id, prompt: "task", cwd: root, config }, scope)); client.stopAdmission();

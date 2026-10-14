@@ -36,6 +36,47 @@ test("provider.ts actual committed queued snapshot frames explicit resume; immut
   assert.equal((await restarted.reattach!(second.providerJobId)).state, "completed"); assert.equal((await restarted.result(first.providerJobId)).output, question.output); assert.equal(client.lifecycle().connected, false);
   assert.equal((await f.rows()).filter(r => r.name === "agy_start").length, 2);
 });
+for (const phase of ["acknowledged", "dispatch_unknown"] as const) for (const action of ["reattach", "status", "control"] as const) test(`PR5 cold recovery: ${phase} ${action} rebuilds cwd evidence without redispatch or adopting ownership`, async t => {
+  const f = await providerFixture(t, "persistRunning"); const first = await f.provider.start(f.input());
+  if (phase === "dispatch_unknown") await withProviderDeadline(async scope => {
+    const turn = f.store.getTurn(first.providerJobId, scope);
+    f.store.settleTurn(turn.jobId, { phase, semanticState: "execution_unknown", checkpoint: null, output: null, conversationId: turn.conversationId, errorCode: "test_lost_response", evidence: turn.evidence }, scope);
+  });
+  await f.client.close();
+  const store = new AssignmentStore(f.store.root, OWNER, null); const client = f.createClient();
+  const recovered = createAgyProvider({ store, client, env: f.env });
+  if (action === "control") assert.equal((await recovered.control({ action: "status", runId: "run-1" }, OWNER)).status.phase, "acknowledged");
+  else assert.equal((await recovered[action](first.providerJobId)).state, "running");
+  assert.notEqual(client.lifecycle().generation, f.client.lifecycle().generation);
+  assert.equal(client.ownership(first.providerJobId), null);
+  await assert.rejects(recovered.control({ action: "cancel", runId: "run-1" }, OWNER), /lease_not_owned|mcp_cancel_not_owned/);
+  await withProviderDeadline(async scope => { await fs.access(path.join(store.ownerDirectory, `${first.providerJobId}.lease`)); });
+  const rows = await f.rows(); assert.equal(rows.filter(r => r.name === "agy_start").length, 1);
+  assert.equal(rows.filter(r => r.name === "agy_cancel").length, 0);
+  assert.equal(rows.filter(r => r.event === "fixture_process").length, 2);
+  assert.ok(rows.filter(r => r.name === "agy").every(r => r.dry_run === true));
+});
+for (const mode of ["badCwd", "writeMode"] as const) test(`PR5 cold recovery: ${mode} fails closed with the exact unresolved lease retained`, async t => {
+  const f = await providerFixture(t, "persistRunning"); const first = await f.provider.start(f.input()); await f.client.close();
+  const store = new AssignmentStore(f.store.root, OWNER, null); const client = f.createClient(mode);
+  const recovered = createAgyProvider({ store, client, env: f.env });
+  await assert.rejects(recovered.reattach(first.providerJobId), new RegExp(mode === "badCwd" ? "cwd_mismatch" : "command_capability_missing"));
+  await withProviderDeadline(async scope => { assert.equal(store.getTurn(first.providerJobId, scope).phase, "dispatch_unknown"); await fs.access(path.join(store.ownerDirectory, `${first.providerJobId}.lease`)); });
+  assert.equal(client.ownership(first.providerJobId), null);
+  assert.equal((await f.rows()).filter(r => r.name === "agy_start").length, 1);
+  assert.equal((await f.rows()).filter(r => r.name === "agy_cancel").length, 0);
+});
+test("PR5 cold recovery: changed canonical cwd cannot rebuild projection or send a probe", async t => {
+  const f = await providerFixture(t, "persistRunning"); const cwd = path.join(f.root, "workspace"); await fs.mkdir(cwd);
+  const first = await f.provider.start({ ...f.input(), cwd }); await f.client.close();
+  const other = path.join(f.root, "other"); await fs.mkdir(other); await fs.rmdir(cwd); await fs.symlink(other, cwd);
+  const before = (await f.rows()).length; const store = new AssignmentStore(f.store.root, OWNER, null); const client = f.createClient();
+  const recovered = createAgyProvider({ store, client, env: f.env });
+  await assert.rejects(recovered.reattach(first.providerJobId), /cwd_mismatch/);
+  assert.equal((await f.rows()).length, before); assert.equal(client.lifecycle().connected, false);
+  await fs.access(path.join(store.ownerDirectory, `${first.providerJobId}.lease`));
+});
+
 test("provider.ts 256 maximum-length lifetime IDs deliver bounded immutable output and complete bodyless control history", async t => {
   const f = await providerFixture(t, "questionOnly"); let runId = "run-1"; let h = await f.provider.start(f.input(runId));
   const originalId = h.providerJobId; const originalOutput = (await f.provider.result(originalId)).output;

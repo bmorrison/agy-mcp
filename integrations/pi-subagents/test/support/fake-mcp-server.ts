@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -7,7 +7,9 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new McpServer({ name: "offline-agy-fixture", version: "1" });
-const jobs = new Map<string, Record<string, unknown>>();
+// Test-only persisted records permit a real second MCP process, not fake ownership.
+const jobFile = process.env.AGY_PI_TEST_JOB_FILE;
+const jobs = new Map<string, Record<string, unknown>>(jobFile && existsSync(jobFile) ? JSON.parse(readFileSync(jobFile, "utf8")) : []);
 const evidence = process.env.AGY_PI_TEST_EVIDENCE!;
 const mode = process.env.AGY_PI_TEST_MODE ?? "normal";
 const uuid = "12345678-1234-4234-8234-123456789abc";
@@ -63,11 +65,12 @@ server.registerTool("agy_start", { inputSchema: { ...configSchema, job_id: mode 
   if (jobs.has(String(args.job_id))) return response({ success: false });
   const { PROMPT, cd, SESSION_ID, job_id, ...config } = args;
   jobs.set(String(job_id), { job_id, session_id: SESSION_ID ?? uuid,
-    status: completionRoot || ["running", "cancelDelayed", "cancelFalse", "hungCancel"].includes(mode) ? "running" : "completed",
+    status: completionRoot || ["running", "persistRunning", "cancelDelayed", "cancelFalse", "hungCancel"].includes(mode) ? "running" : "completed",
     backend: "agy", cwd: cd, started_at: "2026-10-13T00:00:00Z", updated_at: "2026-10-13T00:00:00Z",
     finished_at: "2026-10-13T00:00:00Z", exit_code: 0, pid: null, log_path: null,
     stdout_path: null, stderr_path: null, events_path: null, artifacts: [], last_event_at: null, error: null,
     request: { ...config, prompt: PROMPT, cwd: cd, session_id: SESSION_ID ?? null, model: args.model ?? null }, extra: {} });
+  if (jobFile) writeFileSync(jobFile, JSON.stringify([...jobs]), { mode: 0o600 });
   return response({ success: true, status: "running", job_id, SESSION_ID: SESSION_ID ?? "", adapter: { backend: "agy" }, command_preview: null });
 });
 server.registerTool("agy_status", { inputSchema: { job_id: z.string() } }, async args => {

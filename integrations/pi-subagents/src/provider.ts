@@ -52,6 +52,17 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
       return await withProviderDeadline(fn, { ...deadline, signal: signal ? AbortSignal.any([admissionAbort.signal, signal]) : admissionAbort.signal });
     } catch (error) { const code = providerDiagnostic(error); throw new ExternalJobProviderError(code, { code }); }
   }
+  async function restoreProjection(t: TurnRecord, scope: ProviderDeadline): Promise<void> {
+    if (projections.has(t.jobId)) return;
+    // Cold recovery is observation only: rebuild public-server consistency
+    // evidence from the frozen canonical cwd/config, never from backend paths.
+    const cwd = await scope.wait(fs.realpath(t.claim.cwd));
+    if (cwd !== t.claim.cwd) fail("cwd_mismatch");
+    if (!(await scope.wait(fs.stat(cwd))).isDirectory()) fail("invalid_cwd");
+    const projection = await client.probeCommand(t.config, cwd, scope, t.expectedConversation ?? undefined);
+    scope.assertAdmission();
+    projections.set(t.jobId, { cwdDigest: projection.cwdDigest, requestedCwdDigest: projection.requestedCwdDigest });
+  }
   function correlate(t: TurnRecord, record: JobRecord): void {
     if (record.job_id !== t.jobId) fail("mcp_job_mismatch");
     requireOperationMarker(record.request.prompt as string, t.operationDigest);
@@ -135,6 +146,7 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
     if (t.phase === "terminal") return handle(t);
     if (t.phase === "claimed") fail("admission_abandoned");
     try {
+      await restoreProjection(t, scope);
       const status = await client.status(id, scope); scope.assertAdmission(); correlate(t, status.record);
       t = store.getTurn(id, scope); if (t.phase === "terminal") return handle(t);
       if (status.record.status === "completed") t = await finalizeTurn(t, scope);
