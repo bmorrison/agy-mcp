@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "packageName": "pi-subagents",
+  "packageVersion": "0.77.0",
+  "archive": "pi-subagents-owner-0.77.0-chord-compatible.tgz",
+  "sha256": "034cb85bdaeb1dc9753cd8679f0cf0cfe8b8dedc0fa2e13c9ccb62663b37bcf0",
+  "license": "MIT",
+  "source": {
+    "kind": "operator-approved-corrected-installed-package",
+    "description": "Portable npm-format capture of the operator-approved corrected pi-subagents 0.77.0 installed package, whose stable-1.x Chord-omission guard (isStableV1/peersDeclareChord/canOmitChord in src/runs/background/runner-aliases.js) is absent from the clean published 0.77.0. Acquired from the operator's installed Pi agent package directory with 'npm pack --ignore-scripts' into a private temp destination, then copied unchanged to this test fixture. No source changes, rebuilds or patches were made. Test-only fixture for the hermetic Gate B owner; excluded from the production package payload. The public source repository's corrected guard is a different revision and is not this artifact; no source revision is claimed or verified for this capture.",
+    "revision": null
+  },
+  "capturedAt": "2026-10-13T05:20:59Z",
+  "archiveFiles": 1331,
+  "moduleHashes": {
+    "src/runs/background/runner-aliases.js": "5a5f0a3526a5374288fb1b76e50b4405c6adafdf49ed88cdcfda8a8280a3e198",
+    "src/api/external-job-provider.js": "b404f74e3e53ce9f493fcc6acc3c84336929d46be3b5256155fc08421389eaca",
+    "src/runs/shared/external-job-runner.js": "71543c8683746b204bf02f5625681c1c740a8f3dbc1db57dd71259e98467da46",
+    "src/runs/shared/external-job-bridge.js": "a8011537db6416c0608a559665de5366ca24d6129a197d13bcd07c6560613fce"
+  },
+  "notes": "The clean published/locked 0.77.0 project-local copy of src/runs/background/runner-aliases.js is 3d97f6680e5741131fbf66eb4ab9516f7f54c669d387e8a3484c6d08fab2cea1 (old guard); it must not be substituted for this fixture. Whole-archive integrity is the sha256 above; module hashes are SHA-256 of the exact archive member bytes. This artifact is identity/provenance evidence only, not proof of native Gate B compatibility."
+}

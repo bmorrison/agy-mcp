@@ -9,6 +9,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from agy_mcp.adapters.base import AdapterRunResult, BaseAdapter, EventSink
 from agy_mcp.config import BackendConfig, Config, ExecuteConfig, SafetyConfig
 from agy_mcp.models import (
@@ -399,8 +401,9 @@ def test_start_short_circuits_when_backend_unavailable(tmp_path: Path):
     assert not any(tmp_path.iterdir())
 
 
-def test_start_running_envelope_redacts_adapter_bin_path(tmp_path: Path):
-    raw_bin_path = str(Path.home() / ".local" / "bin" / "agy")
+@pytest.mark.parametrize("native_home", ["/Users/example", "/home/example"])
+def test_start_running_envelope_redacts_adapter_bin_path(tmp_path: Path, native_home: str):
+    raw_bin_path = f"{native_home}/.local/bin/agy"
     adapter = _ScriptedAdapter(
         capability=_capability(bin_path=raw_bin_path),
         events=[CanonicalEvent(type="assistant", text="hi")],

@@ -1,9 +1,19 @@
 # Reliable delegation from Pi, Codex, or another MCP parent
 
 AGY is a separate agent with its own context. The parent owns scope, routing,
-validation, integration, and acceptance. These are MCP workflows, not a native
-Pi subagent extension: automatic Pi child registration, steering, and completion
-wakeups are not supplied by this bridge.
+validation, integration, and acceptance. The generic MCP workflows below do not
+supply native Pi child registration, live steering or completion wakes. The
+optional [Pi checkpoint adapter](../integrations/pi-subagents/README.md) is a
+separate Node client package, not a Python MCP feature; its offline gates pass,
+but whole-package/release acceptance and live AGY readiness remain pending.
+It uses ordinary `subagent` launch/resume and native turn-completion notices:
+UI-capable hosts can wake a truly idle supervisor, while JSON/headless uses
+queued auto-drain. Each Pi run is one checkpoint turn, not a continuously running
+assignment. Before workflow advancement inspect the checkpoint fence or
+`agy_subagent_control(status).status.semanticState`; question/progress/blocked
+are incomplete assignments even when the Pi turn completed. Queue only persists
+guidance for explicit resume; cancellation signal and parent acceptance remain
+separate. The adapter does not supply live steering or automatic replies.
 
 ## A bounded assignment
 

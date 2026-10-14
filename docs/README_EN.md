@@ -203,6 +203,12 @@ that repo knows when to call `agy`:
 | [`release.md`](release.md) | PyPI trusted publishing + GitHub Release manual (one-time setup + routine flow) |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | Version history (Keep a Changelog) |
 
+The optional [Pi checkpoint adapter](../integrations/pi-subagents/README.md)
+is a separate Node client, not a Python dependency/tool change. Its offline
+gates pass; whole-package/release acceptance and live AGY readiness remain
+pending. Each Pi run is one checkpoint turn: question/progress/blocked are not
+assignment completion, and parent acceptance remains separate.
+
 ## Development
 
 ```bash

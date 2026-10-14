@@ -1,0 +1,6 @@
+node_modules/
+test-output/
+*.tgz
+__pycache__/
+
+!test/support/pi-subagents-owner-0.77.0-chord-compatible.tgz
