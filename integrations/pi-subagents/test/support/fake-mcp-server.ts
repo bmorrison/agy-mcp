@@ -15,6 +15,12 @@ const mode = process.env.AGY_PI_TEST_MODE ?? "normal";
 const uuid = "12345678-1234-4234-8234-123456789abc";
 const completionRoot = process.env.AGY_PI_TEST_COMPLETION_ROOT;
 const lifecycleRoot = process.env.AGY_PI_TEST_LIFECYCLE_ROOT;
+function observeRecord(record: Record<string, unknown> | undefined) {
+  const file = process.env.AGY_PI_TEST_MODEL_EVIDENCE_FILE;
+  if (record && file && existsSync(file)) record.extra = { model_selection: JSON.parse(readFileSync(file, "utf8")) };
+  else if (record && process.env.AGY_PI_TEST_CONFIGURED_MODEL) record.extra = { model_selection: { requested: (record.request as Record<string, unknown>).model, configured: process.env.AGY_PI_TEST_CONFIGURED_MODEL, observed_cli_selectors: [] } };
+  return record;
+}
 async function hold(name: string) {
   if (!lifecycleRoot) return;
   appendFileSync(evidence, JSON.stringify({ event: "boundary", name }) + "\n");
@@ -76,7 +82,7 @@ server.registerTool("agy_start", { inputSchema: { ...configSchema, job_id: mode 
 server.registerTool("agy_status", { inputSchema: { job_id: z.string() } }, async args => {
   log("agy_status", args);
   if (mode === "delayStatus") await new Promise(r => setTimeout(r, 200));
-  const record = jobs.get(args.job_id);
+  const record = observeRecord(jobs.get(args.job_id));
   if (record && ["failed", "upstream_error", "cancelled"].includes(mode)) record.status = mode;
   if (record && mode === "badMarker") (record.request as Record<string, unknown>).prompt += "\nAGY_PI_OP v1 " + "f".repeat(16) + "." + "f".repeat(16) + "." + "f".repeat(16) + "." + "f".repeat(16);
   if (record && mode === "badConfig") (record.request as Record<string, unknown>).sandbox = false;
@@ -100,7 +106,7 @@ server.registerTool("agy_result", { inputSchema: { job_id: z.string(), include_e
   log("agy_result", args);
   if (mode === "delayResult") await new Promise(r => setTimeout(r, 150));
   if (mode === "holdResult") await hold("result");
-  const record = jobs.get(args.job_id);
+  const record = observeRecord(jobs.get(args.job_id));
   const resumed = !!(record?.request as Record<string, unknown> | undefined)?.session_id;
   const observedId = mode === "conversationMismatch" ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" : uuid;
   const events = [{ type: "system", subtype: mode === "initOnly" ? "init" : resumed ? "conversation_resumed" : "conversation_started", session_id: observedId }];

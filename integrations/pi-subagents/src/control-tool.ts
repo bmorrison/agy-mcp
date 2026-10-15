@@ -13,11 +13,20 @@ export const ControlParameters = Type.Union([
 const Identity = Type.Object({ runId: identity, index: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
 const Receipt = Type.Object({ sequence: Type.Integer({ minimum: 1 }), messageId: identity, contentDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), state: Type.Union([Type.Literal("queued"), Type.Literal("forwarded"), Type.Literal("dispatch_unknown"), Type.Literal("not_delivered")]) }, { additionalProperties: false });
 const nullableString = Type.Union([Type.String(), Type.Null()]);
+const displayText = Type.String({ minLength: 1, maxLength: 256, pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$" });
+const DisplayDatum = Type.Object({ value: displayText, source: Type.Union([Type.Literal("requested"), Type.Literal("configured"), Type.Literal("cli-observed")]), derivedFrom: Type.Optional(Type.Union([Type.Literal("model-label"), Type.Literal("selector")])) }, { additionalProperties: false });
+export const ExecutionMetadataSchema = Type.Object({ model: Type.Optional(DisplayDatum), thinking: Type.Optional(DisplayDatum) }, { additionalProperties: false, minProperties: 1 });
+export const ModelEvidenceSchema = Type.Object({
+  requested: Type.Union([displayText, Type.Null()]), configured: Type.Union([displayText, Type.Null()]), forwarded: Type.Union([displayText, Type.Null()]),
+  forwardingSource: Type.Union([Type.Literal("constructed_argv"), Type.Null()]),
+  observedCliSelectors: Type.Array(displayText, { maxItems: 8, uniqueItems: true }), observedCliSelectorsComplete: Type.Boolean(),
+  effective: Type.Null(), effectiveSource: Type.Literal("unavailable"),
+}, { additionalProperties: false });
 export const ControlOutput = Type.Union([
   Type.Object({ ok: Type.Literal(false), errorCode: Type.String() }, { additionalProperties: false }),
   Type.Object({
     ok: Type.Literal(true), requested: Identity, latest: Identity,
-    status: Type.Object({ assignmentId: identity, latestJobId: identity, runId: identity, stepIndex: Type.Integer({ minimum: 0 }), phase: Type.Union([Type.Literal("claimed"), Type.Literal("dispatching"), Type.Literal("acknowledged"), Type.Literal("dispatch_unknown"), Type.Literal("terminal")]), semanticState: Type.Union([Type.Literal("running"), Type.Literal("waiting_for_supervisor"), Type.Literal("blocked"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("execution_unknown")]), conversationAvailable: Type.Boolean(), errorCode: nullableString, evidence: Type.Object({ backendStatus: nullableString, exitCode: Type.Union([Type.Integer(), Type.Null()]), cancelSignalled: Type.Optional(Type.Boolean()) }, { additionalProperties: false }), receipts: Type.Array(Receipt) }, { additionalProperties: false }),
+    status: Type.Object({ assignmentId: identity, latestJobId: identity, runId: identity, stepIndex: Type.Integer({ minimum: 0 }), phase: Type.Union([Type.Literal("claimed"), Type.Literal("dispatching"), Type.Literal("acknowledged"), Type.Literal("dispatch_unknown"), Type.Literal("terminal")]), semanticState: Type.Union([Type.Literal("running"), Type.Literal("waiting_for_supervisor"), Type.Literal("blocked"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("execution_unknown")]), conversationAvailable: Type.Boolean(), errorCode: nullableString, modelEvidence: Type.Optional(ModelEvidenceSchema), executionMetadata: Type.Optional(Type.Union([ExecutionMetadataSchema, Type.Null()])), evidence: Type.Object({ backendStatus: nullableString, exitCode: Type.Union([Type.Integer(), Type.Null()]), cancelSignalled: Type.Optional(Type.Boolean()) }, { additionalProperties: false }), receipts: Type.Array(Receipt) }, { additionalProperties: false }),
     receipt: Type.Optional(Receipt), cancellation: Type.Optional(Type.Object({ signalled: Type.Union([Type.Boolean(), Type.Null()]), terminalCorrelated: Type.Boolean(), errorCode: nullableString }, { additionalProperties: false })),
   }, { additionalProperties: false }),
 ]);

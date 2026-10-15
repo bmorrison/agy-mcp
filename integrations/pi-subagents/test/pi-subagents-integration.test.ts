@@ -285,7 +285,7 @@ for (const backend of ["node", "python"] as const) test(`Gate C REAL owner nativ
   assert.deepEqual(f.errors, []); assert.equal(f.rows().filter(r => backend === "node" ? r.name === "agy_start" : r.event === "execution").length, 2);
   const noticeFor = (runId: string, status: string) => f.events.find(e => e.type === "notice" && e.customType === "subagent-notify" && (e.details as { runs: { runId: string; status: string }[] }).runs.some(r => r.runId === runId && r.status === status));
   await f.until(() => !!noticeFor(first, "stopped") && !!noticeFor(second, "failed") && host.session.isIdle);
-  assert.match(String(noticeFor(first, "stopped")!.content), /stopped by user/); assert.match(String(noticeFor(second, "failed")!.content), /timed out after 5000ms/);
+  assert.match(String(noticeFor(first, "stopped")!.content), /Subagent stopped(?: by user)?\./); assert.match(String(noticeFor(second, "failed")!.content), /timed out after 5000ms/);
   const cancels = f.rows().filter(r => r.name === "agy_cancel"); assert.equal(cancels.length, 2); assert.notEqual(cancels[0].job_id, cancels[1].job_id); assert.deepEqual(cancels.map(r => r.job_id), [(await f.retained(first)).jobId, (await f.retained(second)).jobId]);
   const nativeDeadlineReceipt = f.events.find(e => e.type === "tool_execution_end" && (e.result as { details?: { asyncId?: string } }).details?.asyncId === second)!;
   assert.equal((nativeDeadlineReceipt.result as { details: { timeoutMs: number } }).details.timeoutMs, 5000);

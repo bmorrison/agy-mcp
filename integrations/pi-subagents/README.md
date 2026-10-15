@@ -7,9 +7,10 @@ result artifacts and notifications. Nothing here changes the Python MCP tools.
 
 **Status:** experimental; offline wire/native/hardening gates are independently
 reviewed. See the [implementation plan](../../docs/plans/add-pi-subagents-checkpoint-adapter.md)
-for package, release, CI and PR acceptance. No live AGY trial or production-readiness
-claim is made. Do not load into a production session without a separately authorized
-upstream trial and operator acceptance.
+for package, release, CI and PR acceptance. A separately authorized live native
+launch/question/resume/queue/completion trial succeeded; its token-labelled value
+was redacted, so exact recall was not verified. The revised marker and enhanced
+evidence trials remain unperformed; no production-readiness claim is made.
 
 ## Prerequisites and operator setup
 
@@ -19,10 +20,16 @@ upstream trial and operator acceptance.
   access; there is no less-private durability fallback. This restriction applies
   to this optional adapter, not the Python agy-mcp package.
 - Node **>=22.19**, a Pi **1.2.0-compatible** host and its `pi-ai`/`typebox` peers.
-- Load one trusted, **Chord-compatible corrected pi-subagents owner** with the
-  inspected external-job/follow-up API. Uncorrected published `0.77.0` alone is
-  insufficient for the tested Pi 1.2 host. The adapter's public provider library
-  is pinned to `0.77.0`; its bytes match the corrected owner's public module.
+- Load one trusted, **unmodified pi-subagents owner** compatible with the host
+  and its public external-job/follow-up protocol. No owner patch or exact version
+  is required by this wrapper. Its public-library dependency is `*`; the lockfile
+  and immutable historical/published test captures record tested bytes, not an
+  update restriction on your separately installed owner. Missing public functions
+  or unsupported protocol fail explicitly before AGY dispatch, without fallback.
+  Future breaking APIs may require wrapper maintenance. Historical note:
+  uncorrected published `0.77.0` did not support the tested Pi 1.2 host; `0.78.0`
+  contains the official host fix. Those versions are compatibility evidence,
+  not a production allowlist or ceiling.
 - Installed `agymcp` (agy-mcp) and an installed/authenticated Antigravity CLI
   supporting the backend's fresh/resumed, sandbox and print contracts. Automated
   tests substitute execution; they do not establish live authentication or flags.
@@ -41,7 +48,7 @@ pi install ./integrations/pi-subagents
 
 Local package dependencies are your responsibility. Pi records the local source
 in its package settings; the loaded owner discovers the manifest's `./agents`
-directory. Keep the corrected owner loaded separately: depending on its public
+directory. Keep your normal owner loaded separately: depending on its public
 library does not load its extension. Restart/reload only with operator approval,
 then check ordinary agent discovery for `agy-reviewer`. Do not copy a second user
 agent or load duplicate owners/providers to work around a discovery failure.
@@ -112,6 +119,40 @@ Output begins with the kind/state and useful message, includes an incomplete
 marker for nonfinal checkpoints, ordinary resume example and complete JSON fence.
 Workflow gates must parse that fence or inspect `status.semanticState` before
 advancing. Even a final assignment leaves **parent acceptance unrecorded**.
+
+### Wrapper model/thinking evidence — not native badges
+
+Control `status.modelEvidence` contains only sanitized, already-correlated
+Python provenance: requested/configured/forwarded labels, forwarding source,
+bounded CLI-observed selectors and completeness, with effective identity always
+unavailable. Wrapper-owned `status.executionMetadata` is a complete selected
+display snapshot, or explicit `null` when no safe selection is available.
+Requested wins over configured, then a single complete observed selector.
+Conflicting selectors remain inspectable; thinking is derived only from the
+selected recognized model label/selector, never borrowed from another source.
+
+New saved checkpoint results append an evidence-labelled line **outside** the
+unchanged four-key model-authored fence, for example:
+
+```text
+Model: Gemini 3.8 Flash [configured]; thinking: medium [configured, label-derived]; effective identity: unavailable.
+```
+
+This is **not verified runtime inference identity**. It is also **not a native
+pi-subagents model/thinking badge**: the current public external-job API has no
+such fields. Native rows/Fleet/handles are untouched. The wrapper does not invent
+handle fields, spoof owner events, create duplicate records/widgets or require
+an upstream change.
+
+The provider keeps at most 2,048 exact-job display entries in memory, sanitizing
+each string to <=256 UTF-8 bytes, detailed evidence to <=4 KiB, and selected
+display to <=2 KiB. A new unavailable/conflicting observation replaces older
+evidence, so old thinking cannot linger. Cache eviction affects display only.
+On a cache miss (including cold terminal replay), both optional status fields
+are **omitted**; no backend request is made solely for display. Existing saved
+output stays byte-immutable and is never parsed to refill the cache. Thus old
+saved text and current unobserved status can legitimately differ. No persisted
+state, config/digest/lease authority or MCP request count changes.
 
 ### Host-mode and deadline boundary
 
@@ -195,7 +236,46 @@ models/tools/skills/extensions/structured-output/fork-context inside AGY, and
 intermediary LLMs. Native required-extension ceilings that demand extensions
 inside all runners can refuse this external runner; never bypass them.
 
+## Separately authorized live retention check
+
+This is an operator-run procedure, not an automatic model call or permission to
+spend quota. Use a disposable fixture under the trusted project's
+`.pi/subagents/`: project-local package discovery does not apply to arbitrary
+`/tmp` directories. Generate a nonsecret marker as `smoke-` plus six random bytes
+encoded as 12 lowercase hexadecimal characters (18 characters total), and label
+it **Retention marker**, never `token:`. Save the expected value and the fixture's
+file inventory/SHA-256 outside the target fixture.
+
+1. Launch `agy-reviewer` natively with that fixture cwd. Ask it to read the marker,
+   remember it in the conversation, and return only a question checkpoint
+   **without** the marker.
+2. Queue guidance requiring the phrase `queued-guidance-received`; queueing
+   persists only. Explicitly resume the exact returned native run/index. Neither
+   the guidance nor resume message may contain the marker. Ask for a completed
+   checkpoint recalling it, without rereading files or calling tools.
+3. Compare the returned marker exactly to the saved value and check the queue
+   phrase. Verify the same observed AGY conversation, canonical cwd and frozen
+   policy, two distinct native runs, both native notifications/wakes where
+   supported, and unchanged fixture inventory/hashes. A forwarded receipt alone
+   is not proof of consumption or compliance.
+
+The no-reread request and advisory profile are not OS-enforced restrictions.
+Offline fake-execution tests establish transport/redaction, not real-model
+memory. A redacted/mismatched reply leaves recall unverified/failed: preserve
+evidence and stop, without raw-log bypass, automatic retry or repair inference.
+
 ## Offline validation and corrected-owner provenance
+
+Published `0.78.0` was additionally checked against the unchanged adapter on
+Pi `1.2.0`: all ten native scenarios passed with Node and actual Python MCP
+fixtures, covering RPC idle wakes, headless delivery, retained resume, queued
+receipts, stop/deadline versus explicit cancellation, restart and fail-closed
+conversation recovery. The stop-notice assertion accepts both owners' wording.
+This was a disposable compatibility experiment, not live AGY inference or a
+replacement for the immutable CI captures below. After updating the owner, **fully
+restart Pi**; `/reload` cannot replace its already-loaded Node modules. In
+`0.78.0`, pressing Esc intentionally suppresses idle wake until your next prompt;
+background completion does not override an operator stop.
 
 The test-only MIT npm capture is
 `test/support/pi-subagents-owner-0.77.0-chord-compatible.tgz`, described in
@@ -204,9 +284,22 @@ The test-only MIT npm capture is
 It is an operator-approved corrected installed-package capture, **not** a
 published corrected release or an invented source revision. Local/native tests
 and the isolated CI job use these exact archive bytes, verify safe members and
-module hashes, and verify public-library equality before loading. They never
-borrow an installed developer owner or patch code. The fixture is not shipped
-in this package; installing the adapter alone does not supply a corrected owner.
+module hashes before loading. Public API/protocol shape and actual native
+behavior are checked independently of mutable dependency bytes. Tests never
+borrow an installed developer owner or patch code. This historical fixture is
+not shipped and is not a requirement to modify your owner.
+
+The additional unmodified published-owner capture is
+`test/support/pi-subagents-0.78.0.tgz`, with registry integrity, safe member
+inventory and module hashes in `test/support/published-owner.json`. SHA-256:
+`9c4562f66c595d9878c04aae31d76727087db6e025b19eeba92d3bab1ac812cc`.
+It was acquired from npm's current published release at test execution time;
+its version is reproducibility provenance, not an installed-owner check.
+All four new two-turn RPC/headless × Node/Python cases pass: wrapper
+status/checkpoint evidence, unchanged native handles, explicit queued resume,
+same conversation/cwd/config, two notifications, and immutable older output.
+The general/provider/historical-native/published-native partitions are bounded
+separately; the published partition includes normal owner cleanup time.
 
 With an already-provisioned authorized Python test environment:
 
@@ -221,7 +314,7 @@ npm --prefix integrations/pi-subagents test
 CI provisions only its disposable locked environments, no real API credentials,
 AGY/model/doctor/quota calls or live smoke. Tests use scripted Pi models/fake AGY,
 actual Python public wire/redaction/command/store behavior and the real corrected
-owner/public SDK RPC/JSON hosts. Offline proof is not live upstream readiness.
+and unmodified published owners/public SDK RPC/JSON hosts. Offline proof is not live upstream readiness.
 The production npm payload is only `package.json`, `src/`, `agents/`, this README;
 Node/state/fixtures stay out of Python wheel/sdist contracts. No publishing or
 persistent user configuration is automated.

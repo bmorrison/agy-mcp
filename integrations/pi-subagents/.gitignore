@@ -4,3 +4,4 @@ test-output/
 __pycache__/
 
 !test/support/pi-subagents-owner-0.77.0-chord-compatible.tgz
+!test/support/pi-subagents-0.78.0.tgz

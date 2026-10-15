@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { extractCorrectedOwner } from "./support/corrected-owner.js";
+import { extractPublishedOwner } from "./support/published-owner.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (name: string) => readFile(path.join(root, name), "utf8");
@@ -29,7 +30,9 @@ test("package exposes only the public provider seam and a discoverable advisory 
   assert.equal(manifest.engines.node, ">=22.19");
   assert.deepEqual(manifest.pi.extensions, ["./src/index.ts"]);
   assert.deepEqual(manifest["pi-subagents"].agents, ["./agents"]);
-  assert.equal(manifest.dependencies["pi-subagents"], "0.77.0");
+  assert.equal(manifest.dependencies["pi-subagents"], "*");
+  const lock = JSON.parse(await read("package-lock.json"));
+  assert.equal(lock.packages[""].dependencies["pi-subagents"], "*");
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["@modelcontextprotocol/sdk", "pi-subagents"]);
   for (const peer of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai", "typebox"]) {
     assert.equal(manifest.peerDependencies[peer], "*");
@@ -70,7 +73,19 @@ test("offline npm dry-run includes exact production sources, agent and README, n
   }
 });
 
-test("portable corrected-owner bytes/provenance match local and CI public library; published owner is not silently substituted", async t => {
+test("published owner is a verified immutable registry capture, never a patched/installed substitute", async t => {
+  const scratch = await mkdtemp(path.join(os.tmpdir(), "agy-pi-published-audit-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const { provenance } = await extractPublishedOwner(path.join(scratch, "owner"));
+  assert.equal(provenance.source.kind, "npm-registry-published");
+  for (const privatePath of ["/Users/", "/private/tmp/", "node_modules/pi-subagents"]) assert.ok(!JSON.stringify(provenance).includes(privatePath));
+  const corrupted = Buffer.from(await readFile(path.join(root, "test/support", provenance.archive)));
+  corrupted[0] ^= 1;
+  await assert.rejects(extractPublishedOwner(path.join(scratch, "rejected"), corrupted), /verify immutable archive/);
+  assert.equal((await readdir(scratch)).includes("rejected"), false);
+});
+
+test("portable corrected-owner provenance remains immutable, independently of the current public library", async t => {
   const scratch = await mkdtemp(path.join(os.tmpdir(), "agy-pi-provenance-audit-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const { ownerRoot, provenance } = await extractCorrectedOwner(path.join(scratch, "owner"));
@@ -78,9 +93,6 @@ test("portable corrected-owner bytes/provenance match local and CI public librar
   assert.equal(provenance.source.revision, null);
   assert.equal(provenance.archiveFiles, 1331);
   assert.doesNotMatch(JSON.stringify(provenance), /\/Users\/|\/private\/tmp\/|node_modules\/pi-subagents/);
-  const installedGuard = await readFile(path.join(root, "node_modules/pi-subagents/src/runs/background/runner-aliases.js"));
   const correctedGuard = await readFile(path.join(ownerRoot, "src/runs/background/runner-aliases.js"));
-  assert.equal(digest(installedGuard), "3d97f6680e5741131fbf66eb4ab9516f7f54c669d387e8a3484c6d08fab2cea1");
   assert.equal(digest(correctedGuard), "5a5f0a3526a5374288fb1b76e50b4405c6adafdf49ed88cdcfda8a8280a3e198");
-  assert.notEqual(digest(installedGuard), digest(correctedGuard));
 });

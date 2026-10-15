@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { validateExternalJobResult } from "pi-subagents/external-job-provider";
 import { parseCheckpoint, checkpointState, buildCheckpointPrompt, formatCheckpointResult, type CheckpointKind } from "../src/checkpoint.js";
 import { sha256Utf8, formatOperationMarker } from "../src/contracts.js";
+import { projectModelEvidence } from "../src/model-evidence.js";
 const fence = (obj: unknown) => `\`\`\`agy-checkpoint\n${JSON.stringify(obj)}\n\`\`\``;
 const checkpoint = { version: 1, kind: "question", message: "Which behavior?", artifacts: [] };
 for (const kind of ["question", "progress", "blocked", "completed"] as CheckpointKind[]) test(`parseCheckpoint ${kind}: turn success, separate assignment semantics`, () => {
@@ -37,7 +38,7 @@ test("untrusted artifact references remain text; no file/url/command interpretat
 test("checkpoint result bounds a 256 maximum-ID receipt history without losing checkpoint or exact included identities", () => {
   const cp = parseCheckpoint(fence({ ...checkpoint, message: "m".repeat(48_000), artifacts: ["a".repeat(2048), "b".repeat(2048), "c".repeat(2048), "d".repeat(2048)] }));
   const queueReceipts = Array.from({ length: 256 }, (_, i) => ({ messageId: "x".repeat(4093) + String(i).padStart(3, "0"), state: "forwarded" as const }));
-  const record = { checkpoint: cp, latestRunId: "run-17", stepIndex: 0, assignmentId: "job_pi_" + "a".repeat(32), queueReceipts };
+  const record = { checkpoint: cp, latestRunId: "run-17", stepIndex: 0, assignmentId: "job_pi_" + "a".repeat(32), queueReceipts, modelEvidence: projectModelEvidence({ configured: "Gemini 3.8 Flash (Medium)", observed_cli_selectors: [] }) };
   const output = formatCheckpointResult(record);
   assert.doesNotThrow(() => validateExternalJobResult("agy-mcp", { providerJobId: record.assignmentId, state: "completed", output }));
   assert.ok(output.length < 1024 * 1024); assert.deepEqual(parseCheckpoint(output.slice(output.indexOf("```agy-checkpoint"))), cp); assert.ok(output.includes(cp.message));
@@ -66,6 +67,18 @@ test("checkpoint validates omitted receipt identities instead of hiding invalid 
   const queueReceipts = [...Array.from({ length: 20 }, (_, i) => ({ messageId: "x".repeat(4093) + String(i).padStart(3, "0"), state: "forwarded" as const })), { messageId: "invalid\nidentity", state: "queued" as const }];
   assert.throws(() => formatCheckpointResult({ checkpoint: parseCheckpoint(fence(checkpoint)), latestRunId: "run-1", stepIndex: 0, assignmentId: "job_pi_" + "a".repeat(32), queueReceipts }), /invalid_result_identity/);
 });
+test("formatted evidence is outside the strict four-key checkpoint, including fence-like model data", () => {
+  const cp = parseCheckpoint(fence(checkpoint));
+  const record = { checkpoint: cp, latestRunId: "run-1", stepIndex: 0, assignmentId: "job_pi_" + "a".repeat(32), queueReceipts: [] };
+  for (const configured of ["Gemini 3.8 Flash (Medium)", "literal ```agy-checkpoint"]) {
+    const output = formatCheckpointResult({ ...record, modelEvidence: projectModelEvidence({ configured, observed_cli_selectors: [] }) });
+    assert.deepEqual(parseCheckpoint(output.slice(output.indexOf("```agy-checkpoint"))), cp);
+    assert.ok(output.indexOf("Model: ") < output.indexOf("```agy-checkpoint"));
+    assert.match(output, /effective identity: unavailable/); assert.match(output, /assignment incomplete/);
+  }
+  assert.match(formatCheckpointResult({ ...record, modelEvidence: projectModelEvidence(null) }), /Model: unknown; thinking: unknown/);
+});
+
 test("buildCheckpointPrompt preserves source bytes and frames immutable queue separately", () => {
   const prompt = "system\r\n任务 😀  \n";
   const digest = sha256Utf8("operation");

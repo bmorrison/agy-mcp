@@ -55,6 +55,28 @@ async function completed(client: AgyMcpClient, jobId: string, scope: Parameters<
   }
   assert.fail("fixture did not finish in bounded polling window");
 }
+
+for (const [label, message, expected] of [
+  ["neutral marker", "Retention marker: sample-memento", "Retention marker: sample-memento"],
+  ["token-labelled control", "Retention token: sample-memento", "Retention token: ***"],
+] as const) test(`Gate A actual Python stdio: retention ${label} uses production redaction`, { timeout: 20_000 }, async () => {
+  await fixture({ AGY_PI_TEST_CHECKPOINT_MESSAGE: message }, async (client, root) => {
+    const prompt = "Check the synthetic response framing only.";
+    const op = operation(root, prompt);
+    await withProviderDeadline(async scope => {
+      await client.probeCommand(config, root, scope);
+      await client.startTurn({ jobId: op.jobId, prompt: buildCheckpointPrompt({ prompt, operationDigest: op.operationDigest, queue: [] }), cwd: root, config }, scope);
+      const status = await completed(client, op.jobId, scope);
+      assert.equal(status.record.status, "completed");
+      const result = await client.result(op.jobId, scope);
+      assert.deepEqual(parseCheckpoint(result.result_text), { version: 1, kind: "question", message: expected, artifacts: [] });
+      assert.equal(requireObservedConversation(result), uuid);
+      const rows = (await readFile(path.join(root, "evidence.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+      assert.equal(rows.filter(row => row.event === "execution").length, 1);
+    });
+  });
+});
+
 test("Gate A actual Python stdio: generated 39-char id/grouped marker, typed storage/envelopes and production previews", { timeout: 20_000 }, async () => {
   await fixture({}, async (client, root) => {
     const prompt = "source\r\n review 😀";

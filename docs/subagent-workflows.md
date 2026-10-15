@@ -14,6 +14,10 @@ assignment. Before workflow advancement inspect the checkpoint fence or
 are incomplete assignments even when the Pi turn completed. Queue only persists
 guidance for explicit resume; cancellation signal and parent acceptance remain
 separate. The adapter does not supply live steering or automatic replies.
+Wrapper-owned status/checkpoint [model evidence](../integrations/pi-subagents/README.md#wrapper-modelthinking-evidence--not-native-badges)
+labels configured/requested/CLI-observed sources and derived thinking; it is
+neither verified serving identity nor native model/thinking badge metadata.
+It uses the unmodified owner’s public provider API, without an owner version pin.
 
 ## A bounded assignment
 

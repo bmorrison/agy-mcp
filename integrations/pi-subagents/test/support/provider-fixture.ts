@@ -14,7 +14,7 @@ export async function providerFixture(t: TestContext, mode = "normal", deadline?
   const evidence = path.join(root, "requests.jsonl");
   const clients: AgyMcpClient[] = [];
   const createClient = (nextMode = mode) => {
-    const client = new AgyMcpClient({ ownerDirectory: store.ownerDirectory, command: process.execPath, args: ["--import", "tsx", fileURLToPath(new URL("./fake-mcp-server.ts", import.meta.url))], env: { PATH: process.env.PATH!, AGY_PI_TEST_MODE: nextMode, AGY_PI_TEST_EVIDENCE: evidence, AGY_PI_TEST_LIFECYCLE_ROOT: root, ...(mode === "persistRunning" ? { AGY_PI_TEST_JOB_FILE: path.join(root, "saved-fixture-jobs.json") } : {}) } });
+    const client = new AgyMcpClient({ ownerDirectory: store.ownerDirectory, command: process.execPath, args: ["--import", "tsx", fileURLToPath(new URL("./fake-mcp-server.ts", import.meta.url))], env: { PATH: process.env.PATH!, AGY_PI_TEST_MODE: nextMode, AGY_PI_TEST_EVIDENCE: evidence, AGY_PI_TEST_LIFECYCLE_ROOT: root, AGY_PI_TEST_MODEL_EVIDENCE_FILE: path.join(root, "model-evidence.json"), ...(mode === "persistRunning" ? { AGY_PI_TEST_JOB_FILE: path.join(root, "saved-fixture-jobs.json") } : {}) } });
     clients.push(client); return client;
   };
   const client = createClient();

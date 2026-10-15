@@ -37,7 +37,8 @@ class RecordingAgy(AgyPrintBackend):
         missing = os.environ.get("AGY_PI_TEST_MISSING_FLAG", "")
         return Capability(
             bin_path="/offline/fake-agy-never-executed", backend="agy", authenticated=True,
-            version="fixture", supports_print=True, supports_model=missing != "model",
+            version="fixture", model=os.environ.get("AGY_PI_TEST_CONFIGURED_MODEL"),
+            supports_print=True, supports_model=missing != "model",
             supports_new_project=missing != "new-project",
             supports_conversation=missing != "conversation",
             supports_sandbox=missing != "sandbox", supports_print_timeout=True,
@@ -92,7 +93,8 @@ class RecordingAgy(AgyPrintBackend):
             evidence({"event": "fixture_completed", "index": index})
         kind = "completed" if request.session_id else "question"
         text = '```agy-checkpoint\n' + json.dumps({"version": 1, "kind": kind,
-                "message": "Review complete." if request.session_id else "Which behavior is authoritative?",
+                "message": os.environ.get("AGY_PI_TEST_CHECKPOINT_MESSAGE",
+                    "Review complete." if request.session_id else "Which behavior is authoritative?"),
                 "artifacts": []}) + '\n```'
         self._emit(ctx, CanonicalEvent(type="assistant", subtype="text", text=text, session_id=sid))
         self._emit(ctx, CanonicalEvent(type="result", subtype="success", session_id=sid))
