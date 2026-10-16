@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -91,6 +92,36 @@ def test_redact_text_handles_pem_block():
     assert REDACTION_PLACEHOLDER in out
     assert "BEGIN PRIVATE KEY" not in out
     assert "MIIEvQIBADANB" not in out
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Retention token: sample-memento", "Retention token: ***"),
+        ("Retention marker: sample-memento", "Retention marker: sample-memento"),
+        ("The smoke-test phrase is sample-memento.", "The smoke-test phrase is sample-memento."),
+    ],
+)
+def test_retention_fixture_redaction_preserves_neutral_markers(message, expected):
+    assert redact_text(message) == expected
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Retention token: sample-memento", "Retention token: ***"),
+        ("Retention marker: sample-memento", "Retention marker: sample-memento"),
+    ],
+)
+def test_retention_checkpoint_remains_parseable_after_redaction(message, expected):
+    checkpoint = {"version": 1, "kind": "completed", "message": message, "artifacts": []}
+    framed = "```agy-checkpoint\n" + json.dumps(checkpoint) + "\n```"
+    redacted = redact_text(framed)
+    assert redacted.startswith("```agy-checkpoint\n")
+    assert redacted.endswith("\n```")
+    assert json.loads(redacted[len("```agy-checkpoint\n"):-len("\n```")]) == {
+        **checkpoint, "message": expected,
+    }
 
 
 def test_redact_text_empty_string_returns_empty():

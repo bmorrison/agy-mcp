@@ -6,7 +6,7 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import { getExternalJobProvider, registerExternalJobProvider, type ExternalJobProvider } from "pi-subagents/external-job-provider";
-import extension from "../src/index.js";
+import extension, { assertPublicProviderApi } from "../src/index.js";
 import { createControlTool, ControlParameters, ControlOutput } from "../src/control-tool.js";
 import { providerFixture, OWNER } from "./support/provider-fixture.js";
 function context(owner = OWNER) { return { sessionManager: { getSessionId: () => owner, getSessionFile: () => undefined } } as unknown as ExtensionToolContext; }
@@ -22,6 +22,26 @@ test("control-tool.ts strict action-specific TypeBox/output schema, fixed failur
   }
   const foreign = await tool.execute("id", { action: "status", runId: "run-1" }, undefined, undefined, context("foreign")); assert.equal(foreign.isError, true); assert.equal(JSON.stringify(foreign).includes("foreign"), false);
   const unknown = await tool.execute("id", { action: "status", runId: "native-other" }, undefined, undefined, context()); assert.equal(unknown.isError, true); assert.equal(Check(ControlOutput, unknown.structuredContent), true);
+});
+
+test("index.ts unsupported public provider API rejects explicitly without a version comparison", () => {
+  for (const value of [null, {}, { getExternalJobProvider() {}, registerExternalJobProvider() {}, ExternalJobProviderError: Error, EXTERNAL_JOB_PROVIDER_PROTOCOL_VERSION: 2 }]) assert.throws(() => assertPublicProviderApi(value), /unsupported_provider_api/);
+  assert.doesNotThrow(() => assertPublicProviderApi({ getExternalJobProvider() {}, registerExternalJobProvider() {}, ExternalJobProviderError: Error, EXTERNAL_JOB_PROVIDER_PROTOCOL_VERSION: 1 }));
+});
+
+test("control output permits absent/complete/null display observations, rejects unknown fields", async t => {
+  const f = await providerFixture(t); const h = await f.provider.start(f.input());
+  const status = (await f.provider.control({ action: "status", runId: "run-1" }, OWNER)).status;
+  const base = { ok: true, requested: { runId: "run-1", index: 0 }, latest: { runId: "run-1", index: 0 }, status };
+  const { modelEvidence, executionMetadata, ...legacy } = status;
+  assert.equal(Check(ControlOutput, { ...base, status: legacy }), true);
+  assert.equal(Check(ControlOutput, base), true); assert.equal(executionMetadata, null);
+  const datum = { model: { value: "Gemini 3.8 Flash", source: "configured" } };
+  assert.equal(Check(ControlOutput, { ...base, status: { ...status, executionMetadata: datum } }), true);
+  assert.equal(Check(ControlOutput, { ...base, status: { ...status, executionMetadata: { ...datum, rawConfig: {} } } }), false);
+  assert.equal(Check(ControlOutput, { ...base, status: { ...status, modelEvidence: { ...modelEvidence, effective: "verified" } } }), false);
+  assert.equal(Check(ControlOutput, { ...base, status: { ...status, executionMetadata: { model: { value: "bad\nline", source: "configured" } } } }), false);
+  assert.deepEqual(Object.keys(h).sort(), ["providerJobId", "state"]);
 });
 
 test("PR5 platform: unsupported extension host rejects before tool/event/provider registration", () => {

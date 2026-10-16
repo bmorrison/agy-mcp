@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.2",
-    "pi-subagents": "0.77.0"
+    "pi-subagents": "*"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

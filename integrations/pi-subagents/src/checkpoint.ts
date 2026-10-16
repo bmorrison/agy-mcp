@@ -1,4 +1,5 @@
 import { assertUtf8, canonicalJson, fail, formatOperationMarker, sha256Utf8 } from "./contracts.js";
+import { formatModelEvidence, type ModelEvidence } from "./model-evidence.js";
 
 export type CheckpointKind = "question" | "blocked" | "progress" | "completed";
 export interface Checkpoint { version: 1; kind: CheckpointKind; message: string; artifacts: string[] }
@@ -58,6 +59,7 @@ export function buildCheckpointPrompt(input: { prompt: string; operationDigest: 
 }
 export interface CheckpointResultRecord {
   checkpoint: Checkpoint; latestRunId: string; stepIndex: number; assignmentId: string;
+  modelEvidence?: ModelEvidence;
   queueReceipts: readonly { messageId: string; state: "queued" | "forwarded" | "dispatch_unknown" | "not_delivered" }[];
 }
 export function formatCheckpointResult(record: CheckpointResultRecord): string {
@@ -77,6 +79,7 @@ export function formatCheckpointResult(record: CheckpointResultRecord): string {
   const omitted = record.queueReceipts.length - receipts.length;
   return [
     `${c.kind} — ${checkpointState(c.kind)}`, c.message,
+    ...(record.modelEvidence ? [formatModelEvidence(record.modelEvidence)] : []),
     c.kind === "completed" ? "Turn complete; assignment completed; parent acceptance unrecorded." : "Turn complete; assignment incomplete; parent acceptance unrecorded.",
     `Latest Pi run/index: ${record.latestRunId}/${record.stepIndex}; retained assignment: ${record.assignmentId}`,
     `Queue receipts (not consumption/compliance): [${receipts.join(",")}]`,

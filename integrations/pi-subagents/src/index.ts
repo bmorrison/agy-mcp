@@ -1,14 +1,22 @@
 import path from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getExternalJobProvider, registerExternalJobProvider } from "pi-subagents/external-job-provider";
+import * as providerApi from "pi-subagents/external-job-provider";
+const { getExternalJobProvider, registerExternalJobProvider } = providerApi;
 import { fail } from "./contracts.js";
 import { AgyMcpClient } from "./mcp-client.js";
 import { createAgyProvider, type AgyProvider } from "./provider.js";
 import { createControlTool } from "./control-tool.js";
 import { AssignmentStore, assertSupportedPlatform } from "./state.js";
 
+/** Check a public interface, never an installed owner's version or private path. */
+export function assertPublicProviderApi(api: unknown): void {
+  if (!api || typeof api !== "object") fail("unsupported_provider_api");
+  const value = api as Record<string, unknown>;
+  if (typeof value.getExternalJobProvider !== "function" || typeof value.registerExternalJobProvider !== "function" || typeof value.ExternalJobProviderError !== "function" || value.EXTERNAL_JOB_PROVIDER_PROTOCOL_VERSION !== 1) fail("unsupported_provider_api");
+}
 export default function agySubagents(pi: ExtensionAPI): void {
   assertSupportedPlatform();
+  assertPublicProviderApi(providerApi);
   let lifetime: { provider: AgyProvider; dispose: () => void; shutdown?: Promise<void> } | undefined;
   let replacement = Promise.resolve();
   const shutdown = (): Promise<void> => {

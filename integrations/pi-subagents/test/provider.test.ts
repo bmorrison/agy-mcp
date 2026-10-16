@@ -10,6 +10,91 @@ import { AgyMcpClient } from "../src/mcp-client.js";
 import { withProviderDeadline } from "../src/deadline.js";
 import { requireOperationMarker, sha256Utf8 } from "../src/contracts.js";
 
+
+test("wrapper evidence is exact-job display data; native handles and caller mutations cannot carry it", async t => {
+  const f = await providerFixture(t, "running"); const file = path.join(f.root, "model-evidence.json");
+  await fs.writeFile(file, JSON.stringify({ configured: "Gemini 3.8 Flash (Medium)", observed_cli_selectors: [] }));
+  const first = await f.provider.start(f.input());
+  assert.deepEqual(Object.keys(first).sort(), ["providerJobId", "state"]);
+  const a = (await f.provider.control({ action: "status", runId: "run-1" }, OWNER)).status;
+  assert.equal(a.executionMetadata?.thinking?.value, "medium"); assert.equal(a.executionMetadata?.model?.source, "configured");
+  a.modelEvidence!.observedCliSelectors.push("caller mutation"); a.executionMetadata!.thinking!.value = "caller mutation";
+  await fs.writeFile(file, JSON.stringify({ configured: "Other label", observed_cli_selectors: [] }));
+  const second = await f.provider.start(f.input("other"));
+  assert.notEqual(second.providerJobId, first.providerJobId);
+  const before = (await f.rows()).filter(row => row.name).length;
+  const queue = await f.provider.control({ action: "queue", runId: "run-1", messageId: "safe-id", message: "private guidance never exposed" }, OWNER);
+  assert.equal(queue.status.executionMetadata?.thinking?.value, "medium"); assert.deepEqual(queue.status.modelEvidence?.observedCliSelectors, []);
+  assert.ok(!JSON.stringify(queue).includes("private guidance")); assert.equal((await f.rows()).filter(row => row.name).length, before);
+  const b = (await f.provider.control({ action: "status", runId: "other" }, OWNER)).status;
+  assert.equal(b.executionMetadata?.model?.value, "Other label"); assert.equal(b.executionMetadata?.thinking, undefined);
+  assert.deepEqual(Object.keys(await f.provider.result(second.providerJobId)).sort(), ["providerJobId", "state"]);
+});
+
+test("new complete/conflicting/unavailable evidence replaces the entire same-job display snapshot", async t => {
+  const f = await providerFixture(t, "running"); const file = path.join(f.root, "model-evidence.json");
+  const write = (value: unknown) => fs.writeFile(file, JSON.stringify(value));
+  await write({ observed_cli_selectors: ["gemini-3.1-pro-low"] }); await f.provider.start(f.input());
+  const status = async () => (await f.provider.control({ action: "status", runId: "run-1" }, OWNER)).status;
+  assert.equal((await status()).executionMetadata?.thinking?.value, "low");
+  await write({ observed_cli_selectors: ["gemini-3.1-pro-low", "gemini-3.8-flash-high"] });
+  const conflict = await status(); assert.equal(conflict.executionMetadata, null); assert.equal(conflict.modelEvidence?.observedCliSelectors.length, 2);
+  await write({ configured: "Unknown effort", observed_cli_selectors: [] });
+  const modelOnly = await status(); assert.equal(modelOnly.executionMetadata?.model?.value, "Unknown effort"); assert.equal(modelOnly.executionMetadata?.thinking, undefined);
+  await write(null);
+  const missing = await status(); assert.equal(missing.executionMetadata, null); assert.equal(missing.modelEvidence?.configured, null);
+});
+
+test("evidence is never admitted before mandatory record correlation succeeds", async t => {
+  const f = await providerFixture(t, "badMarker");
+  await fs.writeFile(path.join(f.root, "model-evidence.json"), JSON.stringify({ configured: "Foreign label", observed_cli_selectors: [] }));
+  const set = Map.prototype.set; let admissions = 0;
+  Map.prototype.set = function (key, value) {
+    if (typeof key === "string" && key.startsWith("job_pi_") && value?.effectiveSource === "unavailable") admissions++;
+    return set.call(this, key, value);
+  };
+  try { await assert.rejects(f.provider.start(f.input()), /operation_marker_mismatch/); assert.equal(admissions, 0); }
+  finally { Map.prototype.set = set; }
+  assert.equal((await f.rows()).filter(row => row.name === "agy_start").length, 1);
+});
+
+test("saved evidence text is immutable while a cold terminal control lookup omits unobserved fields", async t => {
+  const f = await providerFixture(t);
+  await fs.writeFile(path.join(f.root, "model-evidence.json"), JSON.stringify({ configured: "Gemini 3.8 Flash (Medium)", observed_cli_selectors: [] }));
+  const h = await f.provider.start(f.input()); const result = await f.provider.result(h.providerJobId);
+  assert.ok(result.output!.includes("thinking: medium [configured, label-derived]"));
+  assert.ok(!("executionMetadata" in result)); assert.ok(!("modelEvidence" in result));
+  const cold = createAgyProvider({ store: new AssignmentStore(f.store.root, OWNER, null), client: f.createClient(), env: f.env });
+  const count = (await f.rows()).filter(row => row.name).length;
+  const status = (await cold.control({ action: "status", runId: "run-1" }, OWNER)).status;
+  assert.ok(!("executionMetadata" in status)); assert.ok(!("modelEvidence" in status));
+  assert.equal((await cold.result(h.providerJobId)).output, result.output); assert.equal((await f.rows()).filter(row => row.name).length, count);
+  await f.client.close();
+});
+
+test("metadata performs zero extra MCP operations: paired two-turn sequences have identical complete wire arguments", async t => {
+  const plain = await providerFixture(t); const enriched = await providerFixture(t);
+  await fs.writeFile(path.join(enriched.root, "model-evidence.json"), JSON.stringify({ configured: "Gemini 3.8 Flash (Medium)", observed_cli_selectors: [] }));
+  for (const f of [plain, enriched]) {
+    const first = await f.provider.start({ ...f.input(), cwd: plain.root }); await f.provider.result(first.providerJobId);
+    await f.provider.control({ action: "queue", runId: "run-1", messageId: "same-guidance", message: "same private guidance" }, OWNER);
+    const second = await f.provider.followUp({ ...f.follow(first.providerJobId), cwd: plain.root }); await f.provider.result(second.providerJobId);
+    await f.provider.control({ action: "status", runId: "run-1" }, OWNER);
+    assert.equal((await f.rows()).filter(row => row.name === "agy_start").length, 2);
+  }
+  const operations = async (f: typeof plain) => (await f.rows()).filter(row => typeof row.name === "string");
+  assert.deepEqual(await operations(plain), await operations(enriched));
+});
+
+test("display cache clears during shutdown even when the owning client close rejects", async t => {
+  const f = await providerFixture(t); const h = await f.provider.start(f.input()); await f.provider.result(h.providerJobId);
+  const clear = Map.prototype.clear; const close = f.client.close; let cleared = 0;
+  Map.prototype.clear = function () { if (this.get(h.providerJobId)?.effectiveSource === "unavailable") cleared++; return clear.call(this); };
+  f.client.close = async () => { await close.call(f.client); throw new Error("fixture_close_failure"); };
+  try { await assert.rejects(f.provider.shutdown(), /fixture_close_failure/); assert.equal(cleared, 1); }
+  finally { Map.prototype.clear = clear; f.client.close = close; }
+});
+
 test("provider.ts actual committed queued snapshot frames explicit resume; immutable cache and completed restart", async t => {
   const f = await providerFixture(t); const first = await f.provider.start(f.input());
   const question = await f.provider.result(first.providerJobId); assert.equal(question.state, "completed"); assert.match(question.output!, /assignment incomplete/);

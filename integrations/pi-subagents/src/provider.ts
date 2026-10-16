@@ -6,6 +6,7 @@ import { buildCheckpointPrompt, checkpointState, formatCheckpointResult, parseCh
 import { AgyMcpClient, requireObservedConversation, type JobRecord, type ResultEnvelope } from "./mcp-client.js";
 import { ProviderDeadline, withProviderDeadline } from "./deadline.js";
 import { AssignmentStore, type AssignmentStatus, type QueueReceipt, type TurnRecord } from "./state.js";
+import { copyModelEvidence, projectModelEvidence, rememberModelEvidence, selectExecutionMetadata, type ModelEvidence, type ExecutionMetadata } from "./model-evidence.js";
 
 export function resolveExecutionConfig(options: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): ExecutionConfig {
   if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).length) fail("unsupported_provider_options");
@@ -23,7 +24,7 @@ function handle(t: TurnRecord): ExternalJobHandle {
 }
 function patch(t: TurnRecord) { return { phase: t.phase, semanticState: t.semanticState, checkpoint: t.checkpoint, output: t.output, conversationId: t.conversationId, errorCode: t.errorCode, evidence: t.evidence }; }
 export interface ControlInput { action: "status" | "queue" | "cancel"; runId: string; index?: number; message?: string; messageId?: string }
-export interface ControlResult { requested: { runId: string; index: number }; latest: { runId: string; index: number }; status: AssignmentStatus; receipt?: QueueReceipt; cancellation?: { signalled: boolean | null; terminalCorrelated: boolean; errorCode: string | null } }
+export interface ControlResult { requested: { runId: string; index: number }; latest: { runId: string; index: number }; status: AssignmentStatus & { modelEvidence?: ModelEvidence; executionMetadata?: ExecutionMetadata | null }; receipt?: QueueReceipt; cancellation?: { signalled: boolean | null; terminalCorrelated: boolean; errorCode: string | null } }
 export interface AgyProviderOptions {
   store: AssignmentStore; client: AgyMcpClient; env?: NodeJS.ProcessEnv;
   /** Hermetic clock/budget injection only; never populated from model/environment options. */
@@ -43,6 +44,12 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
   let accepting = true; let shutdownFlight: Promise<void> | undefined;
   const admissionAbort = new AbortController();
   const finalizations = new Map<string, Promise<TurnRecord>>();
+  const modelEvidence = new Map<string, ModelEvidence>();
+  function assignmentStatus(id: string, scope: ProviderDeadline): ControlResult["status"] {
+    const status = store.getAssignmentStatus(id, scope);
+    const evidence = modelEvidence.get(status.latestJobId);
+    return evidence === undefined ? status : { ...status, modelEvidence: copyModelEvidence(evidence), executionMetadata: selectExecutionMetadata(evidence) };
+  }
   // Public-server redacted-cwd projection, bound to the exact outgoing canonical cwd.
   // Consistency evidence, not reconstruction or OS cwd attestation. Never persisted/exposed.
   const projections = new Map<string, { cwdDigest: string; requestedCwdDigest: string }>();
@@ -72,6 +79,8 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
     if (!projection) fail("cwd_unverifiable");
     if (projection.requestedCwdDigest !== sha256Utf8(t.claim.cwd) || record.cwd !== record.request.cwd || sha256Utf8(record.cwd) !== projection.cwdDigest) fail("cwd_mismatch");
     if (t.expectedConversation && record.session_id !== t.expectedConversation) fail("conversation_lineage_mismatch");
+    // Observation only, after every authority/correlation check has succeeded.
+    rememberModelEvidence(modelEvidence, t.jobId, projectModelEvidence(record.extra.model_selection));
   }
   function unknown(t: TurnRecord, error: unknown, scope: ProviderDeadline): void {
     if (t.phase === "terminal" || t.phase === "claimed") return;
@@ -126,7 +135,7 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
     try { conversationId = requireObservedConversation(result, t.expectedConversation ?? undefined); checkpoint = parseCheckpoint(result.result_text); }
     catch (error) { return store.saveTurn(t.jobId, { ...patch(current), phase: "terminal", semanticState: "failed", errorCode: providerDiagnostic(error), evidence }, scope); }
     return store.finalizeTurn(t.jobId, { phase: "terminal", semanticState: checkpointState(checkpoint.kind), checkpoint, output: "", conversationId, errorCode: null, evidence }, scope,
-      receipts => formatCheckpointResult({ checkpoint, latestRunId: t.claim.runId, stepIndex: t.claim.stepIndex, assignmentId: t.assignmentId, queueReceipts: receipts }), settlement);
+      receipts => formatCheckpointResult({ checkpoint, latestRunId: t.claim.runId, stepIndex: t.claim.stepIndex, assignmentId: t.assignmentId, queueReceipts: receipts, modelEvidence: modelEvidence.get(t.jobId) }), settlement);
   }
   async function finalizeTurn(t: TurnRecord, scope: ProviderDeadline): Promise<TurnRecord> {
     let flight = finalizations.get(t.jobId);
@@ -202,19 +211,19 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
       const identities = { requested: { runId: target.requested.claim.runId, index: target.requested.claim.stepIndex }, latest: { runId: target.latest.claim.runId, index: target.latest.claim.stepIndex } };
       if (input.action === "queue") {
         const receipt = store.enqueueMessage(target.latest.jobId, input.messageId!, input.message!, scope);
-        return { ...identities, receipt, status: store.getAssignmentStatus(target.latest.jobId, scope) };
+        return { ...identities, receipt, status: assignmentStatus(target.latest.jobId, scope) };
       }
       if (input.action === "cancel") {
         if (target.requested.jobId !== target.latest.jobId) fail("stale_cancel_target");
         if (target.latest.phase === "terminal") fail("cancel_target_inactive");
         requireOwned(target.latest, scope);
         const budget = new ProviderDeadline(deadline?.clock, Math.min(10_000, scope.remaining()), 0, scope.signal);
-        try { const cancellation = await cancelTurn(target.latest, budget); return { ...identities, cancellation, status: store.getAssignmentStatus(target.latest.jobId, scope) }; }
+        try { const cancellation = await cancelTurn(target.latest, budget); return { ...identities, cancellation, status: assignmentStatus(target.latest.jobId, scope) }; }
         finally { budget.dispose(); }
       }
       if (input.action !== "status") fail("invalid_control_action");
       await observe(target.latest.jobId, scope);
-      return { ...identities, status: store.getAssignmentStatus(target.latest.jobId, scope) };
+      return { ...identities, status: assignmentStatus(target.latest.jobId, scope) };
     }, signal),
     shutdown: () => shutdownFlight ??= (async () => {
       provider.stopAdmission();
@@ -238,7 +247,7 @@ export function createAgyProvider({ store, client, env = process.env, deadline }
           catch (error) { if (t) unknown(t, error, local); }
         }));
       } finally {
-        try { await local.wait(client.close()); } finally { work.dispose(); local.dispose(); }
+        try { await local.wait(client.close()); } finally { modelEvidence.clear(); work.dispose(); local.dispose(); }
       }
     })(),
   };
